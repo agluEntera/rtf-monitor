@@ -28,8 +28,10 @@ import java.util.stream.Collectors;
  * <p>
  * Поддерживаемые команды (настраиваются в Mattermost):
  * <ul>
- *   <li>{@code /rft-status} — полный отчёт по всем статусам</li>
- *   <li>{@code /rft-stale}  — зависшие задачи по категориям</li>
+ *   <li>{@code /rft-status}  — полный отчёт по всем статусам</li>
+ *   <li>{@code /rft-review}  — отчёт: Ready for Review + Under Review</li>
+ *   <li>{@code /rft-testing} — отчёт: Ready for Testing + In Testing</li>
+ *   <li>{@code /rft-stale}   — зависшие задачи по категориям</li>
  * </ul>
  * <p>
  * Для активации установи {@code MATTERMOST_ENABLED=true} в .env.
@@ -126,20 +128,19 @@ public final class MattermostBot {
     private String route(String command) {
 
         try {
-            List<Issue> issues = "/rft-stale".equals(command)
-                ? List.of()
-                : this.issueService.getIssues();
-            Map<String, OptionalDouble> p70ByStatus = "/rft-stale".equals(command)
-                ? Map.of()
-                : this.buildP70Map();
+            boolean isStale = "/rft-stale".equals(command);
+            List<Issue> issues = isStale ? List.of() : this.issueService.getIssues();
+            Map<String, OptionalDouble> p70ByStatus = isStale ? Map.of() : this.buildP70Map();
 
             String text = switch (command) {
-                case "/rft-status" -> this.messageBuilder.buildFullReport(issues, p70ByStatus);
-                case "/rft-stale"  -> {
+                case "/rft-status"  -> this.messageBuilder.buildFullReport(issues, p70ByStatus);
+                case "/rft-review"  -> this.messageBuilder.buildGroupReport(issues, p70ByStatus, AppConfig.REVIEW_STATUSES);
+                case "/rft-testing" -> this.messageBuilder.buildGroupReport(issues, p70ByStatus, AppConfig.TESTING_STATUSES);
+                case "/rft-stale"   -> {
                     StaleReport staleReport = this.issueService.getStaleReport();
                     yield this.messageBuilder.buildStaleReport(staleReport);
                 }
-                default -> "Неизвестная команда. Доступны: /rft-status, /rft-stale";
+                default -> "Неизвестная команда. Доступны: /rft-status, /rft-review, /rft-testing, /rft-stale";
             };
 
             return this.responseJson(RESPONSE_TYPE_IN_CHANNEL, text);

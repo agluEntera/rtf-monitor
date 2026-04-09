@@ -16,6 +16,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * Client for Jira REST API v3.
@@ -26,9 +28,20 @@ public class JiraApiClient {
     //region Constants
 
     private static final String SEARCH_PATH = "/rest/api/3/search/jql";
+    private static final String CHANGELOG_PATH = "/rest/api/3/issue/%s/changelog";
     private static final String STORY_POINTS_FIELD = "customfield_10022";
     private static final DateTimeFormatter JIRA_DATE_FORMAT =
         DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
+
+    /**
+     * Maps Russian Jira status names (as returned by the REST API) to canonical English names
+     * used throughout the application logic.
+     */
+    private static final Map<String, String> STATUS_NAME_ALIASES = Map.of(
+        "Готово к проверке", "Ready for Review",
+        "В работе",          "In Progress",
+        "Закрыто",           "Closed"
+    );
 
     //endregion
 
@@ -101,6 +114,66 @@ public class JiraApiClient {
             + " AND status not in (" + excluded + ") ORDER BY updated ASC", 500);
     }
 
+    /**
+     * Возвращает дату последнего перехода задачи в указанный статус через Jira API.
+     * <p>
+     * Используется как фолбэк, когда MySQL-зеркало ещё не обновилось после перехода
+     * (обычно 0–несколько задач за запрос).
+     *
+     * @param issueKey     ключ задачи, например {@code EN-4717}
+     * @param targetStatus целевой статус (канонический, английский)
+     * @return дата последнего входа в статус, или {@code empty} если не найдено
+     */
+    public Optional<LocalDateTime> fetchLastEnteredAt(String issueKey, String targetStatus) {
+
+        try {
+            String url = this.config.getJiraUrl()
+                + String.format(CHANGELOG_PATH, issueKey)
+                + "?maxResults=100";
+
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Authorization", this.authHeader)
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+
+            HttpResponse<String> response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                return Optional.empty();
+            }
+
+            JsonNode values = this.objectMapper.readTree(response.body()).path("values");
+            LocalDateTime found = null;
+
+            for (JsonNode history : values) {
+                for (JsonNode item : history.path("items")) {
+                    if ("status".equals(item.path("field").asText())) {
+                        String toRaw = item.path("toString").asText();
+                        String toStatus = STATUS_NAME_ALIASES.getOrDefault(toRaw, toRaw);
+
+                        if (targetStatus.equals(toStatus)) {
+                            String ts = history.path("created").asText("");
+                            if (ts.length() >= 19) {
+                                LocalDateTime date = LocalDateTime.parse(ts.substring(0, 19), JIRA_DATE_FORMAT);
+                                if (found == null || date.isAfter(found)) {
+                                    found = date;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return Optional.ofNullable(found);
+        } catch (Exception e) {
+            System.err.println("[Jira] fetchLastEnteredAt error for " + issueKey + ": " + e.getMessage());
+
+            return Optional.empty();
+        }
+    }
+
     //endregion
 
     //region Private
@@ -154,7 +227,8 @@ public class JiraApiClient {
             JsonNode fields = issueNode.path("fields");
 
             String summary = fields.path("summary").asText("");
-            String status = fields.path("status").path("name").asText("");
+            String statusRaw = fields.path("status").path("name").asText("");
+            String status = STATUS_NAME_ALIASES.getOrDefault(statusRaw, statusRaw);
             String type = fields.path("issuetype").path("name").asText("");
 
             JsonNode assigneeNode = fields.path("assignee");

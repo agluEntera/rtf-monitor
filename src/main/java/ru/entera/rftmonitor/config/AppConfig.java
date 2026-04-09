@@ -14,8 +14,21 @@ public class AppConfig {
     //region Constants
 
     public static final List<String> MONITORED_STATUSES = List.of(
-        "Ready for Testing",
         "Ready for Review",
+        "Under Review",
+        "Ready for Testing",
+        "In Testing"
+    );
+
+    /** Статусы ревью для команды /review. */
+    public static final List<String> REVIEW_STATUSES = List.of(
+        "Ready for Review",
+        "Under Review"
+    );
+
+    /** Статусы тестирования для команды /testing. */
+    public static final List<String> TESTING_STATUSES = List.of(
+        "Ready for Testing",
         "In Testing"
     );
 
@@ -23,6 +36,7 @@ public class AppConfig {
     public static final List<String> STALE_IN_PROGRESS_STATUSES = List.of(
         "In Progress",
         "In Review",
+        "Under Review",
         "In Testing"
     );
 

@@ -12,8 +12,9 @@
 
 | Статус | Эмодзи |
 |--------|--------|
-| Ready for Testing | 🧪 |
 | Ready for Review | 👀 |
+| Under Review | 🔍 |
+| Ready for Testing | 🧪 |
 | In Testing | ⚙️ |
 
 Задача считается **просроченной**, если находится в статусе дольше `THRESHOLD_BUSINESS_DAYS` рабочих дней (по умолчанию 4).
@@ -24,7 +25,7 @@
 
 | Категория | Статусы | Порог |
 |-----------|---------|-------|
-| В работе | In Progress, In Review, In Testing | > 2 раб. дн. |
+| В работе | In Progress, In Review, Under Review, In Testing | > 2 раб. дн. |
 | Долгая очередь | Ready for Review, Ready for Testing | > 4 раб. дн. |
 | Покинутые | Все нетерминальные | > 8 раб. дн. |
 
@@ -34,7 +35,7 @@
 |-----------|------------|
 | Bot | Java 21 + Maven + telegrambots 6.9.7.1 |
 | База данных | MySQL (зеркало Jira) |
-| Jira API | REST API v3 (POST `/rest/api/3/search/jql`) |
+| Jira API | REST API v3: поиск — `POST /rest/api/3/search/jql`, changelog — `GET /rest/api/3/issue/{key}/changelog` |
 | Контейнеризация | Docker + Docker Compose |
 | Дашборд | Looker Studio (Custom SQL) |
 
@@ -61,6 +62,7 @@ rft-monitor/
 │   │       ├── MonitorBot.java                — Telegram бот
 │   │       └── MattermostBot.java             — Mattermost slash-команды
 │   └── test/java/ru/entera/rftmonitor/service/
+│       ├── IssueServiceGetIssuesTest.java
 │       ├── IssueServiceStaleReportTest.java
 │       ├── MessageBuilderStaleReportTest.java
 │       └── MattermostMessageBuilderStaleReportTest.java
@@ -127,14 +129,16 @@ docker compose logs -f
 | Команда | Описание |
 |---------|----------|
 | `/start`, `/help` | Список команд |
-| `/status` | Полный отчёт по всем 3 статусам с P70 + зависшие задачи |
+| `/status` | Полный отчёт по всем 4 статусам с P70 + зависшие задачи |
+| `/review` | Отчёт: Ready for Review + Under Review |
+| `/testing` | Отчёт: Ready for Testing + In Testing |
 | `/stale` | Зависшие задачи по категориям |
 
 ## Метрики
 
 **On-time %** — доля задач в статусе ≤ `THRESHOLD_BUSINESS_DAYS` рабочих дней.
 
-**P70** — 70-й перцентиль времени в статусе по задачам проекта EN, которые покинули статус за последние 3 месяца. Источник: `IssueStatusDurations` + `DetailedIssuesChangelog`. Конвертация: `часы / 24 × 5/7`.
+**P70** — 70-й перцентиль времени в статусе по задачам проекта EN, которые покинули статус за последние 3 месяца. Источник: `IssueStatusDurations` + `DetailedIssuesChangelog`. Конвертация: `часы / 24 × 5/7`. Рассчитывается для каждого из 4 статусов.
 
 ## Схема БД (MySQL)
 
@@ -146,7 +150,7 @@ docker compose logs -f
 | `IssueSprints` | Принадлежность задач к спринтам |
 | `Developer`, `Tester` | Назначенные люди |
 
-> Данные обновляются раз в сутки ночью. Изменения статусов текущего дня отразятся в следующем отчёте.
+> Данные обновляются раз в сутки ночью. Если задача перешла в статус после последней синхронизации, бот автоматически получает дату перехода через Jira API (`/issue/{key}/changelog`) в реальном времени.
 
 ## Mattermost (опционально)
 
@@ -155,6 +159,8 @@ docker compose logs -f
 | Команда | URL |
 |---------|-----|
 | `/rft-status` | `http://<host>:<MATTERMOST_PORT>/mattermost` |
+| `/rft-review` | `http://<host>:<MATTERMOST_PORT>/mattermost` |
+| `/rft-testing` | `http://<host>:<MATTERMOST_PORT>/mattermost` |
 | `/rft-stale` | `http://<host>:<MATTERMOST_PORT>/mattermost` |
 
 Подробная инструкция: `Mattermost — инструкция.md`.

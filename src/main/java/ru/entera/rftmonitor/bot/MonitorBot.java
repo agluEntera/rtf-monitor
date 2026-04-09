@@ -24,6 +24,8 @@ import java.util.OptionalDouble;
  * <ul>
  *   <li>{@code /start}, {@code /help} — command list</li>
  *   <li>{@code /status} — full report by status</li>
+ *   <li>{@code /review} — report for Ready for Review + Under Review</li>
+ *   <li>{@code /testing} — report for Ready for Testing + In Testing</li>
  *   <li>{@code /stale} — stale issues by category</li>
  * </ul>
  */
@@ -72,6 +74,8 @@ public final class MonitorBot extends TelegramLongPollingBot {
         SetMyCommands setMyCommands = SetMyCommands.builder()
             .commands(List.of(
                 BotCommand.builder().command("status").description("Полный отчёт по всем статусам").build(),
+                BotCommand.builder().command("review").description("Отчёт: Ready for Review + Under Review").build(),
+                BotCommand.builder().command("testing").description("Отчёт: Ready for Testing + In Testing").build(),
                 BotCommand.builder().command("stale").description("Зависшие задачи по категориям").build(),
                 BotCommand.builder().command("help").description("Список команд").build()
             ))
@@ -99,6 +103,10 @@ public final class MonitorBot extends TelegramLongPollingBot {
             this.handleHelp(chatId);
         } else if (text.startsWith("/status")) {
             this.handleStatus(chatId);
+        } else if (text.startsWith("/review")) {
+            this.handleReview(chatId);
+        } else if (text.startsWith("/testing")) {
+            this.handleTesting(chatId);
         } else if (text.startsWith("/stale")) {
             this.handleStale(chatId);
         }
@@ -113,6 +121,8 @@ public final class MonitorBot extends TelegramLongPollingBot {
         this.send(chatId,
             "<b>RFT Monitor</b> — мониторинг задач в тестировании\n\n"
             + "/status — полный отчёт по всем статусам\n"
+            + "/review — отчёт: Ready for Review + Under Review\n"
+            + "/testing — отчёт: Ready for Testing + In Testing\n"
             + "/stale — зависшие задачи по категориям"
         );
     }
@@ -132,6 +142,32 @@ public final class MonitorBot extends TelegramLongPollingBot {
             String staleMessage = this.messageBuilder.buildStaleReport(staleReport);
 
             this.send(chatId, staleMessage);
+        } catch (Exception e) {
+            this.send(chatId, "❌ Ошибка: " + e.getMessage());
+        }
+    }
+
+    private void handleReview(long chatId) {
+
+        this.send(chatId, "⏳ Собираю данные...");
+
+        try {
+            List<Issue> issues = this.issueService.getIssues();
+            Map<String, OptionalDouble> p70ByStatus = this.buildP70Map();
+            this.send(chatId, this.messageBuilder.buildGroupReport(issues, p70ByStatus, AppConfig.REVIEW_STATUSES));
+        } catch (Exception e) {
+            this.send(chatId, "❌ Ошибка: " + e.getMessage());
+        }
+    }
+
+    private void handleTesting(long chatId) {
+
+        this.send(chatId, "⏳ Собираю данные...");
+
+        try {
+            List<Issue> issues = this.issueService.getIssues();
+            Map<String, OptionalDouble> p70ByStatus = this.buildP70Map();
+            this.send(chatId, this.messageBuilder.buildGroupReport(issues, p70ByStatus, AppConfig.TESTING_STATUSES));
         } catch (Exception e) {
             this.send(chatId, "❌ Ошибка: " + e.getMessage());
         }

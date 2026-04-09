@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
+import java.util.stream.Collectors;
 
 /**
  * Builds HTML-formatted Telegram messages from issue data.
@@ -20,9 +21,17 @@ public final class MessageBuilder {
     //region Constants
 
     private static final Map<String, String> STATUS_EMOJI = Map.of(
-        "Ready for Testing", "🧪",
         "Ready for Review",  "👀",
+        "Under Review",      "🔍",
+        "Ready for Testing", "🧪",
         "In Testing",        "⚙️"
+    );
+
+    private static final Map<String, String> STATUS_SHORT = Map.of(
+        "Ready for Review",  "RFR",
+        "Under Review",      "UR",
+        "Ready for Testing", "RFT",
+        "In Testing",        "IT"
     );
 
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
@@ -50,7 +59,7 @@ public final class MessageBuilder {
     //region Public
 
     /**
-     * Builds a full monitoring report grouped by status.
+     * Builds a full monitoring report grouped by status (all monitored statuses).
      *
      * @param issues        all monitored issues
      * @param p70ByStatus   map from status name to P70 in business days
@@ -58,42 +67,20 @@ public final class MessageBuilder {
      */
     public String buildFullReport(List<Issue> issues, Map<String, OptionalDouble> p70ByStatus) {
 
-        String today = LocalDateTime.now().format(DATE_FORMAT);
-        StringBuilder sb = new StringBuilder();
-        sb.append("<b>📋 Зависшие задачи — ").append(today).append("</b>\n\n");
+        return this.buildReport(issues, p70ByStatus, AppConfig.MONITORED_STATUSES);
+    }
 
-        for (String status : AppConfig.MONITORED_STATUSES) {
-            List<Issue> group = issues.stream()
-                .filter(i -> status.equals(i.getStatus()))
-                .toList();
+    /**
+     * Builds a monitoring report for a specific subset of statuses.
+     *
+     * @param issues        all monitored issues
+     * @param p70ByStatus   map from status name to P70 in business days
+     * @param statuses      statuses to include in the report
+     * @return HTML-formatted message
+     */
+    public String buildGroupReport(List<Issue> issues, Map<String, OptionalDouble> p70ByStatus, List<String> statuses) {
 
-            String emoji = STATUS_EMOJI.getOrDefault(status, "📋");
-
-            if (group.isEmpty()) {
-                sb.append(emoji).append(" <b>").append(status).append("</b> — нет задач\n");
-                continue;
-            }
-
-            OptionalDouble p70 = p70ByStatus.getOrDefault(status, OptionalDouble.empty());
-            sb.append(this.buildStatusSection(status, emoji, group, p70));
-            sb.append("\n");
-        }
-
-        int total = issues.size();
-        long ok = issues.stream().filter(i -> !i.isOverdue()).count();
-        int pct = total > 0 ? (int) Math.round((double) ok / total * 100) : 0;
-        String flag = pct >= this.config.getTargetPercent() ? "✅" : "⚠️";
-
-        sb.append(flag).append(" <b>Итого: on-time ")
-            .append(ok).append("/").append(total)
-            .append(" = ").append(pct).append("%</b>  (цель ≥ ")
-            .append(this.config.getTargetPercent()).append("%)\n\n");
-
-        sb.append("<i>📌 Проект: ").append(this.config.getJiraProject())
-            .append(" · Спринт: активный · Статусы: RFT, RFR, In Testing · Порог: ")
-            .append(this.config.getThresholdBusinessDays()).append(" раб. дн. · P70: последние 3 мес.</i>");
-
-        return sb.toString();
+        return this.buildReport(issues, p70ByStatus, statuses);
     }
 
     /**
@@ -257,6 +244,52 @@ public final class MessageBuilder {
     //endregion
 
     //region Private
+
+    private String buildReport(List<Issue> issues, Map<String, OptionalDouble> p70ByStatus, List<String> statuses) {
+
+        String today = LocalDateTime.now().format(DATE_FORMAT);
+        StringBuilder sb = new StringBuilder();
+        sb.append("<b>📋 Зависшие задачи — ").append(today).append("</b>\n\n");
+
+        for (String status : statuses) {
+            List<Issue> group = issues.stream()
+                .filter(i -> status.equals(i.getStatus()))
+                .toList();
+
+            String emoji = STATUS_EMOJI.getOrDefault(status, "📋");
+
+            if (group.isEmpty()) {
+                sb.append(emoji).append(" <b>").append(status).append("</b> — нет задач\n");
+                continue;
+            }
+
+            OptionalDouble p70 = p70ByStatus.getOrDefault(status, OptionalDouble.empty());
+            sb.append(this.buildStatusSection(status, emoji, group, p70));
+            sb.append("\n");
+        }
+
+        List<Issue> subset = issues.stream().filter(i -> statuses.contains(i.getStatus())).toList();
+        int total = subset.size();
+        long ok = subset.stream().filter(i -> !i.isOverdue()).count();
+        int pct = total > 0 ? (int) Math.round((double) ok / total * 100) : 0;
+        String flag = pct >= this.config.getTargetPercent() ? "✅" : "⚠️";
+
+        sb.append(flag).append(" <b>Итого: on-time ")
+            .append(ok).append("/").append(total)
+            .append(" = ").append(pct).append("%</b>  (цель ≥ ")
+            .append(this.config.getTargetPercent()).append("%)\n\n");
+
+        String statusShort = statuses.stream()
+            .map(s -> STATUS_SHORT.getOrDefault(s, s))
+            .collect(Collectors.joining(", "));
+
+        sb.append("<i>📌 Проект: ").append(this.config.getJiraProject())
+            .append(" · Спринт: активный · Статусы: ").append(statusShort)
+            .append(" · Порог: ")
+            .append(this.config.getThresholdBusinessDays()).append(" раб. дн. · P70: последние 3 мес.</i>");
+
+        return sb.toString();
+    }
 
     private String formatStaleIssueLine(StaleIssue issue) {
 

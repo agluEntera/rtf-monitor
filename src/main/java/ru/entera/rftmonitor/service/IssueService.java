@@ -61,10 +61,13 @@ public final class IssueService {
         List<Issue> result = new ArrayList<>();
 
         for (JiraApiClient.RawIssue raw : rawIssues) {
+            // Primary: MySQL (нормальный случай — зеркало актуально)
             LocalDateTime enteredAt = enteredDates.get(raw.key() + "_" + raw.status());
 
+            // Fallback: Jira changelog API — когда переход случился после последней ночной синхронизации
             if (enteredAt == null) {
-                enteredAt = raw.created();
+                enteredAt = this.jiraApiClient.fetchLastEnteredAt(raw.key(), raw.status())
+                    .orElse(raw.created());
             }
 
             Integer bdays = enteredAt != null
