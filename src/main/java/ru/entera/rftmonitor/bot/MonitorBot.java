@@ -213,8 +213,16 @@ public final class MonitorBot extends TelegramLongPollingBot {
             String candidate = chunk.isEmpty() ? line : chunk + "\n" + line;
 
             if (candidate.length() > 4096) {
-                this.sendRaw(chatId, chunk.toString());
-                chunk = new StringBuilder(line);
+                if (!chunk.isEmpty()) {
+                    this.sendRaw(chatId, chunk.toString());
+                }
+                // Строка сама по себе длиннее лимита — режем посимвольно
+                String remaining = line;
+                while (remaining.length() > 4096) {
+                    this.sendRaw(chatId, remaining.substring(0, 4096));
+                    remaining = remaining.substring(4096);
+                }
+                chunk = new StringBuilder(remaining);
             } else {
                 chunk = new StringBuilder(candidate);
             }

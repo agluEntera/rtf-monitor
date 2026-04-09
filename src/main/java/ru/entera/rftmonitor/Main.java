@@ -58,7 +58,7 @@ public final class Main {
                 System.out.println("Telegram Bot запущен.");
             } catch (TelegramApiException e) {
                 System.err.println("Failed to start Telegram bot: " + e.getMessage());
-                System.exit(1);
+                // Не завершаем процесс — Mattermost бот может работать независимо
             }
         }
 
