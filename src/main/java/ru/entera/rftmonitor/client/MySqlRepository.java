@@ -16,7 +16,7 @@ import java.util.OptionalDouble;
 /**
  * Repository for reading Jira data from the MySQL mirror database.
  */
-public final class MySqlRepository {
+public class MySqlRepository {
 
     //region Fields
 

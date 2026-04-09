@@ -21,7 +21,7 @@ import java.util.List;
  * Client for Jira REST API v3.
  * Fetches issues in monitored statuses.
  */
-public final class JiraApiClient {
+public class JiraApiClient {
 
     //region Constants
 

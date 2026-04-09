@@ -9,7 +9,7 @@ import java.util.List;
  * Application configuration loaded from .env file and environment variables.
  */
 @Getter
-public final class AppConfig {
+public class AppConfig {
 
     //region Constants
 
