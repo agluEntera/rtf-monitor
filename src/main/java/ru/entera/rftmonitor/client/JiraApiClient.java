@@ -80,6 +80,7 @@ public final class JiraApiClient {
         String jqlStatuses = statuses.stream().map(s -> "\"" + s + "\"").collect(java.util.stream.Collectors.joining(", "));
 
         return this.fetchByJql("project = " + this.config.getJiraProject()
+            + " AND sprint in openSprints()"
             + " AND status in (" + jqlStatuses + ") ORDER BY created ASC", 200);
     }
 
@@ -96,6 +97,7 @@ public final class JiraApiClient {
         String excluded = terminal.stream().map(s -> "\"" + s + "\"").collect(java.util.stream.Collectors.joining(", "));
 
         return this.fetchByJql("project = " + this.config.getJiraProject()
+            + " AND sprint in openSprints()"
             + " AND status not in (" + excluded + ") ORDER BY updated ASC", 500);
     }
 
