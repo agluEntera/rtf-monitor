@@ -23,6 +23,7 @@ public final class AppConfig {
     private static final int DEFAULT_THRESHOLD = 4;
     private static final int DEFAULT_TARGET_PERCENT = 70;
     private static final int DEFAULT_MYSQL_PORT = 3306;
+    private static final int DEFAULT_MATTERMOST_PORT = 8080;
 
     //endregion
 
@@ -42,6 +43,9 @@ public final class AppConfig {
     private final int targetPercent;
     private final String proxyHost;
     private final int proxyPort;
+    private final boolean mattermostEnabled;
+    private final int mattermostPort;
+    private final String mattermostToken;
 
     //endregion
 
@@ -71,6 +75,10 @@ public final class AppConfig {
         this.targetPercent = Integer.parseInt(
             dotenv.get("TARGET_PERCENT", String.valueOf(DEFAULT_TARGET_PERCENT))
         );
+
+        this.mattermostEnabled = Boolean.parseBoolean(dotenv.get("MATTERMOST_ENABLED", "false"));
+        this.mattermostPort = Integer.parseInt(dotenv.get("MATTERMOST_PORT", String.valueOf(DEFAULT_MATTERMOST_PORT)));
+        this.mattermostToken = dotenv.get("MATTERMOST_TOKEN", "");
 
         String rawProxy = System.getenv("https_proxy");
 

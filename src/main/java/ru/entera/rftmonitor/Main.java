@@ -4,11 +4,13 @@ import org.telegram.telegrambots.bots.DefaultBotOptions;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
+import ru.entera.rftmonitor.bot.MattermostBot;
 import ru.entera.rftmonitor.bot.MonitorBot;
 import ru.entera.rftmonitor.client.JiraApiClient;
 import ru.entera.rftmonitor.client.MySqlRepository;
 import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.service.IssueService;
+import ru.entera.rftmonitor.service.MattermostMessageBuilder;
 import ru.entera.rftmonitor.service.MessageBuilder;
 
 /**
@@ -43,6 +45,8 @@ public final class Main {
         JiraApiClient jiraApiClient = new JiraApiClient(config);
         MySqlRepository mySqlRepository = new MySqlRepository(config);
         IssueService issueService = new IssueService(config, jiraApiClient, mySqlRepository);
+
+        // Telegram bot
         MessageBuilder messageBuilder = new MessageBuilder(config);
         MonitorBot bot = new MonitorBot(botOptions, config, issueService, messageBuilder);
 
@@ -50,10 +54,22 @@ public final class Main {
             TelegramBotsApi botsApi = new TelegramBotsApi(DefaultBotSession.class);
             botsApi.registerBot(bot);
             bot.registerCommands();
-            System.out.println("RFT Monitor Bot запущен.");
+            System.out.println("Telegram Bot запущен.");
         } catch (TelegramApiException e) {
-            System.err.println("Failed to start bot: " + e.getMessage());
+            System.err.println("Failed to start Telegram bot: " + e.getMessage());
             System.exit(1);
+        }
+
+        // Mattermost bot (включается через MATTERMOST_ENABLED=true в .env)
+        if (config.isMattermostEnabled()) {
+            MattermostMessageBuilder mmMessageBuilder = new MattermostMessageBuilder(config);
+            MattermostBot mattermostBot = new MattermostBot(config, issueService, mmMessageBuilder);
+
+            try {
+                mattermostBot.start();
+            } catch (Exception e) {
+                System.err.println("Failed to start Mattermost bot: " + e.getMessage());
+            }
         }
     }
 
