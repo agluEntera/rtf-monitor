@@ -60,7 +60,7 @@ public final class MessageBuilder {
 
         String today = LocalDateTime.now().format(DATE_FORMAT);
         StringBuilder sb = new StringBuilder();
-        sb.append("<b>📋 Мониторинг тестирования — ").append(today).append("</b>\n\n");
+        sb.append("<b>📋 Зависшие задачи — ").append(today).append("</b>\n\n");
 
         for (String status : AppConfig.MONITORED_STATUSES) {
             List<Issue> group = issues.stream()

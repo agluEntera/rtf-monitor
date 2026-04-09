@@ -63,7 +63,7 @@ public final class MattermostMessageBuilder {
 
         String today = LocalDateTime.now().format(DATE_FORMAT);
         StringBuilder sb = new StringBuilder();
-        sb.append("## 📋 Мониторинг тестирования — ").append(today).append("\n\n");
+        sb.append("## 📋 Зависшие задачи — ").append(today).append("\n\n");
 
         for (String status : AppConfig.MONITORED_STATUSES) {
             List<Issue> group = issues.stream()
