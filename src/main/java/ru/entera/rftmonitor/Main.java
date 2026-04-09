@@ -1,5 +1,6 @@
 package ru.entera.rftmonitor;
 
+import org.telegram.telegrambots.bots.DefaultBotOptions;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
@@ -30,12 +31,12 @@ public final class Main {
 
         AppConfig config = new AppConfig();
 
+        DefaultBotOptions botOptions = new DefaultBotOptions();
+
         if (config.hasProxy()) {
-            System.setProperty("https.proxyHost", config.getProxyHost());
-            System.setProperty("https.proxyPort", String.valueOf(config.getProxyPort()));
-            System.setProperty("http.proxyHost", config.getProxyHost());
-            System.setProperty("http.proxyPort", String.valueOf(config.getProxyPort()));
-            System.setProperty("http.nonProxyHosts", "localhost|127.*");
+            botOptions.setProxyHost(config.getProxyHost());
+            botOptions.setProxyPort(config.getProxyPort());
+            botOptions.setProxyType(DefaultBotOptions.ProxyType.HTTP);
             System.out.println("Proxy configured: " + config.getProxyHost() + ":" + config.getProxyPort());
         }
 
@@ -43,7 +44,7 @@ public final class Main {
         MySqlRepository mySqlRepository = new MySqlRepository(config);
         IssueService issueService = new IssueService(config, jiraApiClient, mySqlRepository);
         MessageBuilder messageBuilder = new MessageBuilder(config);
-        MonitorBot bot = new MonitorBot(config, issueService, messageBuilder);
+        MonitorBot bot = new MonitorBot(botOptions, config, issueService, messageBuilder);
 
         try {
             TelegramBotsApi botsApi = new TelegramBotsApi(DefaultBotSession.class);

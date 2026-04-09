@@ -1,5 +1,6 @@
 package ru.entera.rftmonitor.bot;
 
+import org.telegram.telegrambots.bots.DefaultBotOptions;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -37,13 +38,14 @@ public final class MonitorBot extends TelegramLongPollingBot {
     //region Ctor
 
     /**
+     * @param options        bot options (proxy, timeouts)
      * @param config         application configuration
      * @param issueService   service for fetching and enriching issues
      * @param messageBuilder service for building Telegram messages
      */
-    public MonitorBot(AppConfig config, IssueService issueService, MessageBuilder messageBuilder) {
+    public MonitorBot(DefaultBotOptions options, AppConfig config, IssueService issueService, MessageBuilder messageBuilder) {
 
-        super(config.getTelegramBotToken());
+        super(options, config.getTelegramBotToken());
         this.config = config;
         this.issueService = issueService;
         this.messageBuilder = messageBuilder;
