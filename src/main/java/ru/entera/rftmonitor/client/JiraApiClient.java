@@ -94,7 +94,7 @@ public class JiraApiClient {
 
         return this.fetchByJql("project = " + this.config.getJiraProject()
             + " AND sprint in openSprints()"
-            + " AND status in (" + jqlStatuses + ") ORDER BY created ASC", 200);
+            + " AND status in (" + jqlStatuses + ") ORDER BY created ASC");
     }
 
     /**
@@ -111,7 +111,7 @@ public class JiraApiClient {
 
         return this.fetchByJql("project = " + this.config.getJiraProject()
             + " AND sprint in openSprints()"
-            + " AND status not in (" + excluded + ") ORDER BY updated ASC", 500);
+            + " AND status not in (" + excluded + ") ORDER BY updated ASC");
     }
 
     /**
@@ -178,39 +178,53 @@ public class JiraApiClient {
 
     //region Private
 
-    private List<RawIssue> fetchByJql(String jql, int maxResults) {
+    private List<RawIssue> fetchByJql(String jql) {
 
         try {
-            ObjectNode body = this.objectMapper.createObjectNode();
-            body.put("jql", jql);
-            body.put("maxResults", maxResults);
+            List<RawIssue> all = new ArrayList<>();
+            String nextPageToken = null;
 
-            ArrayNode fields = this.objectMapper.createArrayNode();
-            fields.add("summary");
-            fields.add("status");
-            fields.add("issuetype");
-            fields.add("assignee");
-            fields.add(STORY_POINTS_FIELD);
-            fields.add("created");
-            body.set("fields", fields);
+            do {
+                ObjectNode body = this.objectMapper.createObjectNode();
+                body.put("jql", jql);
+                body.put("maxResults", 100);
 
-            HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(this.config.getJiraUrl() + SEARCH_PATH))
-                .header("Authorization", this.authHeader)
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
-                .build();
+                if (nextPageToken != null) {
+                    body.put("nextPageToken", nextPageToken);
+                }
 
-            HttpResponse<String> response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                ArrayNode fields = this.objectMapper.createArrayNode();
+                fields.add("summary");
+                fields.add("status");
+                fields.add("issuetype");
+                fields.add("assignee");
+                fields.add(STORY_POINTS_FIELD);
+                fields.add("created");
+                body.set("fields", fields);
 
-            if (response.statusCode() != 200) {
-                throw new RuntimeException("Jira API error: " + response.statusCode() + " — " + response.body());
-            }
+                HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(this.config.getJiraUrl() + SEARCH_PATH))
+                    .header("Authorization", this.authHeader)
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+                    .build();
 
-            JsonNode root = this.objectMapper.readTree(response.body());
+                HttpResponse<String> response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-            return this.parseIssues(root);
+                if (response.statusCode() != 200) {
+                    throw new RuntimeException("Jira API error: " + response.statusCode() + " — " + response.body());
+                }
+
+                JsonNode root = this.objectMapper.readTree(response.body());
+                all.addAll(this.parseIssues(root));
+
+                JsonNode tokenNode = root.path("nextPageToken");
+                nextPageToken = tokenNode.isMissingNode() || tokenNode.isNull() ? null : tokenNode.asText();
+
+            } while (nextPageToken != null);
+
+            return all;
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
