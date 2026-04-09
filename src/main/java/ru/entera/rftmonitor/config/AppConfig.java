@@ -48,6 +48,7 @@ public final class AppConfig {
     public static final int STALE_ABANDONED_DAYS = 8;
 
     private static final String DEFAULT_JIRA_URL = "https://entera.atlassian.net";
+    private static final String DEFAULT_JIRA_PROJECT = "EN";
     private static final int DEFAULT_THRESHOLD = 4;
     private static final int DEFAULT_TARGET_PERCENT = 70;
     private static final int DEFAULT_MYSQL_PORT = 3306;
@@ -59,6 +60,7 @@ public final class AppConfig {
     //region Fields
 
     private final String jiraUrl;
+    private final String jiraProject;
     private final String jiraEmail;
     private final String jiraApiToken;
     private final String telegramBotToken;
@@ -91,6 +93,7 @@ public final class AppConfig {
         Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
 
         this.jiraUrl = dotenv.get("JIRA_URL", DEFAULT_JIRA_URL);
+        this.jiraProject = dotenv.get("JIRA_PROJECT", DEFAULT_JIRA_PROJECT);
         this.jiraEmail = dotenv.get("JIRA_EMAIL");
         this.jiraApiToken = dotenv.get("JIRA_API_TOKEN");
         this.telegramBotToken = dotenv.get("TELEGRAM_BOT_TOKEN");

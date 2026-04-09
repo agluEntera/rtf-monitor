@@ -79,7 +79,8 @@ public final class JiraApiClient {
         List<String> statuses = AppConfig.MONITORED_STATUSES;
         String jqlStatuses = statuses.stream().map(s -> "\"" + s + "\"").collect(java.util.stream.Collectors.joining(", "));
 
-        return this.fetchByJql("status in (" + jqlStatuses + ") ORDER BY created ASC", 200);
+        return this.fetchByJql("project = " + this.config.getJiraProject()
+            + " AND status in (" + jqlStatuses + ") ORDER BY created ASC", 200);
     }
 
     /**
@@ -94,7 +95,8 @@ public final class JiraApiClient {
         List<String> terminal = AppConfig.TERMINAL_STATUSES;
         String excluded = terminal.stream().map(s -> "\"" + s + "\"").collect(java.util.stream.Collectors.joining(", "));
 
-        return this.fetchByJql("status not in (" + excluded + ") ORDER BY updated ASC", 500);
+        return this.fetchByJql("project = " + this.config.getJiraProject()
+            + " AND status not in (" + excluded + ") ORDER BY updated ASC", 500);
     }
 
     //endregion
@@ -107,7 +109,6 @@ public final class JiraApiClient {
             ObjectNode body = this.objectMapper.createObjectNode();
             body.put("jql", jql);
             body.put("maxResults", maxResults);
-            body.put("startAt", 0);
 
             ArrayNode fields = this.objectMapper.createArrayNode();
             fields.add("summary");
