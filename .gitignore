@@ -12,6 +12,7 @@ venv/
 target/
 *.class
 *.jar
+.m2/
 
 # IDE
 .idea/
