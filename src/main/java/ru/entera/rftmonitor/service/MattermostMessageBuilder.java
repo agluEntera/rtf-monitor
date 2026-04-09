@@ -94,7 +94,7 @@ public final class MattermostMessageBuilder {
 
         sb.append("_📌 Проект: ").append(this.config.getJiraProject())
             .append(" · Спринт: активный · Статусы: RFT, RFR, In Testing · Порог: ")
-            .append(this.config.getThresholdBusinessDays()).append(" раб. дн._");
+            .append(this.config.getThresholdBusinessDays()).append(" раб. дн. · P70: последние 3 мес._");
 
         return sb.toString();
     }

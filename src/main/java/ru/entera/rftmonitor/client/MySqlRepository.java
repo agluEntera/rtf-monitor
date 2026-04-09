@@ -107,8 +107,10 @@ public class MySqlRepository {
     }
 
     /**
-     * Computes the 70th percentile of time spent in the given status across all closed issues.
-     * Uses calendar-hours-to-business-days conversion (5/7 ratio).
+     * Computes the 70th percentile of time spent in the given status.
+     * <p>
+     * Scope: issues from the configured project that left the status within the last 3 months.
+     * Conversion: calendar hours → business days via 5/7 ratio.
      *
      * @param status status name matching a column in {@code IssueStatusDurations}
      * @return P70 in business days, or empty if no historical data
@@ -116,10 +118,19 @@ public class MySqlRepository {
     public OptionalDouble getP70BusinessDays(String status) {
 
         String sql = """
-            SELECT `%s`
-            FROM IssueStatusDurations
-            WHERE `%s` > 0
-              AND current_status != ?
+            SELECT isd.`%s`
+            FROM IssueStatusDurations isd
+            JOIN IssuesInfo i ON i.IssueKey = isd.Key
+            WHERE isd.`%s` > 0
+              AND isd.current_status != ?
+              AND isd.Key LIKE ?
+              AND i.IssueId IN (
+                  SELECT c.IssueId
+                  FROM DetailedIssuesChangelog c
+                  WHERE c.Field = 'status'
+                    AND c.Old = ?
+                    AND c.CreatedDate >= DATE_SUB(NOW(), INTERVAL 3 MONTH)
+              )
             """.formatted(status, status);
 
         List<Double> values = new ArrayList<>();
@@ -128,6 +139,8 @@ public class MySqlRepository {
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             stmt.setString(1, status);
+            stmt.setString(2, this.config.getJiraProject() + "-%");
+            stmt.setString(3, status);
 
             try (ResultSet rs = stmt.executeQuery()) {
 

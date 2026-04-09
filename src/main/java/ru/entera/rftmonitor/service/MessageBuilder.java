@@ -91,7 +91,7 @@ public final class MessageBuilder {
 
         sb.append("<i>📌 Проект: ").append(this.config.getJiraProject())
             .append(" · Спринт: активный · Статусы: RFT, RFR, In Testing · Порог: ")
-            .append(this.config.getThresholdBusinessDays()).append(" раб. дн.</i>");
+            .append(this.config.getThresholdBusinessDays()).append(" раб. дн. · P70: последние 3 мес.</i>");
 
         return sb.toString();
     }
