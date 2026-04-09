@@ -1,0 +1,10 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    network_mode: host
+    environment:
+      - http_proxy=http://127.0.0.1:12334/
+      - https_proxy=http://127.0.0.1:12334/
+      - no_proxy=localhost,127.0.0.0/8,::1,mysql80.hostland.ru
