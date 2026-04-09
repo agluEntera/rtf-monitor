@@ -87,7 +87,11 @@ public final class MessageBuilder {
         sb.append(flag).append(" <b>Итого: on-time ")
             .append(ok).append("/").append(total)
             .append(" = ").append(pct).append("%</b>  (цель ≥ ")
-            .append(this.config.getTargetPercent()).append("%)");
+            .append(this.config.getTargetPercent()).append("%)\n\n");
+
+        sb.append("<i>📌 Проект: ").append(this.config.getJiraProject())
+            .append(" · Спринт: активный · Статусы: RFT, RFR, In Testing · Порог: ")
+            .append(this.config.getThresholdBusinessDays()).append(" раб. дн.</i>");
 
         return sb.toString();
     }
@@ -187,6 +191,10 @@ public final class MessageBuilder {
             sb.append("  ").append(emoji).append(" ").append(status).append(": ").append(p70Str).append("\n");
         }
 
+        sb.append("\n\n<i>📌 Проект: ").append(this.config.getJiraProject())
+            .append(" · Спринт: активный · Порог: ")
+            .append(this.config.getThresholdBusinessDays()).append(" раб. дн.</i>");
+
         return sb.toString().stripTrailing();
     }
 
@@ -236,6 +244,12 @@ public final class MessageBuilder {
                 sb.append("  ").append(this.formatStaleIssueLine(issue)).append("\n");
             }
         }
+
+        sb.append("\n<i>📌 Проект: ").append(this.config.getJiraProject())
+            .append(" · Спринт: активный")
+            .append(" · В работе: In Progress/In Review/In Testing &gt; ").append(AppConfig.STALE_IN_PROGRESS_DAYS).append(" дн.")
+            .append(" · Очередь: RFR/RFT &gt; ").append(AppConfig.STALE_QUEUE_DAYS).append(" дн.")
+            .append(" · Покинутые: все нетерминальные &gt; ").append(AppConfig.STALE_ABANDONED_DAYS).append(" дн.</i>");
 
         return sb.toString().stripTrailing();
     }

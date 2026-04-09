@@ -90,7 +90,11 @@ public final class MattermostMessageBuilder {
         sb.append(flag).append(" **Итого: on-time ")
             .append(ok).append("/").append(total)
             .append(" = ").append(pct).append("%**  (цель ≥ ")
-            .append(this.config.getTargetPercent()).append("%)");
+            .append(this.config.getTargetPercent()).append("%)\n\n");
+
+        sb.append("_📌 Проект: ").append(this.config.getJiraProject())
+            .append(" · Спринт: активный · Статусы: RFT, RFR, In Testing · Порог: ")
+            .append(this.config.getThresholdBusinessDays()).append(" раб. дн._");
 
         return sb.toString();
     }
@@ -190,6 +194,10 @@ public final class MattermostMessageBuilder {
             sb.append("  ").append(emoji).append(" ").append(status).append(": ").append(p70Str).append("\n");
         }
 
+        sb.append("\n\n_📌 Проект: ").append(this.config.getJiraProject())
+            .append(" · Спринт: активный · Порог: ")
+            .append(this.config.getThresholdBusinessDays()).append(" раб. дн._");
+
         return sb.toString().stripTrailing();
     }
 
@@ -239,6 +247,12 @@ public final class MattermostMessageBuilder {
                 sb.append("  ").append(this.formatStaleIssueLine(issue)).append("\n");
             }
         }
+
+        sb.append("\n_📌 Проект: ").append(this.config.getJiraProject())
+            .append(" · Спринт: активный")
+            .append(" · В работе: In Progress/In Review/In Testing > ").append(AppConfig.STALE_IN_PROGRESS_DAYS).append(" дн.")
+            .append(" · Очередь: RFR/RFT > ").append(AppConfig.STALE_QUEUE_DAYS).append(" дн.")
+            .append(" · Покинутые: все нетерминальные > ").append(AppConfig.STALE_ABANDONED_DAYS).append(" дн._");
 
         return sb.toString().stripTrailing();
     }
