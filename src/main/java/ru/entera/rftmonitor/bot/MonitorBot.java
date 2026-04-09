@@ -2,8 +2,10 @@ package ru.entera.rftmonitor.bot;
 
 import org.telegram.telegrambots.bots.DefaultBotOptions;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.model.Issue;
@@ -59,6 +61,29 @@ public final class MonitorBot extends TelegramLongPollingBot {
     public String getBotUsername() {
 
         return "enterajirabot";
+    }
+
+    /**
+     * Registers bot commands so they appear in the Telegram menu (the "/" button).
+     * Call once after the bot is registered with {@link org.telegram.telegrambots.meta.TelegramBotsApi}.
+     */
+    public void registerCommands() {
+
+        SetMyCommands setMyCommands = SetMyCommands.builder()
+            .commands(List.of(
+                BotCommand.builder().command("status").description("Полный отчёт по всем статусам").build(),
+                BotCommand.builder().command("overdue").description("Только просроченные задачи").build(),
+                BotCommand.builder().command("stats").description("Статистика по тестировщикам").build(),
+                BotCommand.builder().command("help").description("Список команд").build()
+            ))
+            .build();
+
+        try {
+            this.execute(setMyCommands);
+            System.out.println("Команды бота зарегистрированы.");
+        } catch (TelegramApiException e) {
+            System.err.println("[Telegram] Ошибка регистрации команд: " + e.getMessage());
+        }
     }
 
     @Override

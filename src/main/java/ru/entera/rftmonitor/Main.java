@@ -49,6 +49,7 @@ public final class Main {
         try {
             TelegramBotsApi botsApi = new TelegramBotsApi(DefaultBotSession.class);
             botsApi.registerBot(bot);
+            bot.registerCommands();
             System.out.println("RFT Monitor Bot запущен.");
         } catch (TelegramApiException e) {
             System.err.println("Failed to start bot: " + e.getMessage());
