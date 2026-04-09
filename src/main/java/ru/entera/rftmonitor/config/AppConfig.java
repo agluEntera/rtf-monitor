@@ -24,6 +24,7 @@ public final class AppConfig {
     private static final int DEFAULT_TARGET_PERCENT = 70;
     private static final int DEFAULT_MYSQL_PORT = 3306;
     private static final int DEFAULT_MATTERMOST_PORT = 8080;
+    private static final String DEFAULT_MATTERMOST_URL = "http://localhost:8065";
 
     //endregion
 
@@ -43,7 +44,9 @@ public final class AppConfig {
     private final int targetPercent;
     private final String proxyHost;
     private final int proxyPort;
+    private final boolean telegramEnabled;
     private final boolean mattermostEnabled;
+    private final String mattermostUrl;
     private final int mattermostPort;
     private final String mattermostToken;
 
@@ -76,7 +79,9 @@ public final class AppConfig {
             dotenv.get("TARGET_PERCENT", String.valueOf(DEFAULT_TARGET_PERCENT))
         );
 
+        this.telegramEnabled = Boolean.parseBoolean(dotenv.get("TELEGRAM_ENABLED", "true"));
         this.mattermostEnabled = Boolean.parseBoolean(dotenv.get("MATTERMOST_ENABLED", "false"));
+        this.mattermostUrl = dotenv.get("MATTERMOST_URL", DEFAULT_MATTERMOST_URL);
         this.mattermostPort = Integer.parseInt(dotenv.get("MATTERMOST_PORT", String.valueOf(DEFAULT_MATTERMOST_PORT)));
         this.mattermostToken = dotenv.get("MATTERMOST_TOKEN", "");
 

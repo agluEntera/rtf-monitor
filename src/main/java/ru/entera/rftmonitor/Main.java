@@ -46,18 +46,20 @@ public final class Main {
         MySqlRepository mySqlRepository = new MySqlRepository(config);
         IssueService issueService = new IssueService(config, jiraApiClient, mySqlRepository);
 
-        // Telegram bot
-        MessageBuilder messageBuilder = new MessageBuilder(config);
-        MonitorBot bot = new MonitorBot(botOptions, config, issueService, messageBuilder);
+        // Telegram bot (включается через TELEGRAM_ENABLED=true в .env, по умолчанию включён)
+        if (config.isTelegramEnabled()) {
+            MessageBuilder messageBuilder = new MessageBuilder(config);
+            MonitorBot bot = new MonitorBot(botOptions, config, issueService, messageBuilder);
 
-        try {
-            TelegramBotsApi botsApi = new TelegramBotsApi(DefaultBotSession.class);
-            botsApi.registerBot(bot);
-            bot.registerCommands();
-            System.out.println("Telegram Bot запущен.");
-        } catch (TelegramApiException e) {
-            System.err.println("Failed to start Telegram bot: " + e.getMessage());
-            System.exit(1);
+            try {
+                TelegramBotsApi botsApi = new TelegramBotsApi(DefaultBotSession.class);
+                botsApi.registerBot(bot);
+                bot.registerCommands();
+                System.out.println("Telegram Bot запущен.");
+            } catch (TelegramApiException e) {
+                System.err.println("Failed to start Telegram bot: " + e.getMessage());
+                System.exit(1);
+            }
         }
 
         // Mattermost bot (включается через MATTERMOST_ENABLED=true в .env)
