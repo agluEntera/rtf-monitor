@@ -16,8 +16,7 @@
 
 | Компонент | Технология |
 |-----------|------------|
-| Bot (основной) | Java 21 + Maven + telegrambots 6.9.7.1 |
-| Bot (legacy) | Python 3.12 + pyTelegramBotAPI |
+| Bot | Java 21 + Maven + telegrambots 6.9.7.1 |
 | База данных | MySQL (зеркало Jira) |
 | Jira API | REST API v3 |
 | Контейнеризация | Docker + Docker Compose |
@@ -41,8 +40,6 @@ rft-monitor/
 ├── sql/
 │   ├── looker_current.sql         — текущие задачи для Looker Studio
 │   └── looker_history.sql         — история для Looker Studio
-├── monitor.py                     — Python: cron-скрипт (плановый отчёт)
-├── bot.py                         — Python: интерактивный бот (legacy)
 ├── Dockerfile                     — multi-stage сборка Java
 ├── docker-compose.yml
 └── .env                           — конфигурация (не коммитится)
@@ -89,15 +86,6 @@ docker compose logs -f
 ```
 
 Бот автоматически перезапускается при падении (`restart: unless-stopped`).
-
-### 3. Плановые отчёты (опционально)
-
-Для ежедневной рассылки через Python-скрипт:
-
-```bash
-pip install -r requirements.txt
-bash setup_cron.sh   # добавляет в cron
-```
 
 ## Команды бота
 
