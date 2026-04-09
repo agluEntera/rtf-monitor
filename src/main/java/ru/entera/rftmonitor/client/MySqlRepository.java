@@ -151,6 +151,58 @@ public final class MySqlRepository {
     }
 
     /**
+     * Returns the last status-change date for each of the given issue keys.
+     * Uses {@code DetailedIssuesChangelog} — updated once per day.
+     *
+     * @param issueKeys list of Jira issue keys to look up
+     * @return map from issue key to the last datetime any status change occurred
+     */
+    public Map<String, LocalDateTime> getLastStatusChangeDates(List<String> issueKeys) {
+
+        Map<String, LocalDateTime> result = new HashMap<>();
+
+        if (issueKeys.isEmpty()) {
+
+            return result;
+        }
+
+        String keyPlaceholders = this.buildPlaceholders(issueKeys.size());
+
+        String sql = """
+            SELECT i.IssueKey, MAX(c.CreatedDate) AS last_change
+            FROM DetailedIssuesChangelog c
+            JOIN IssuesInfo i ON i.IssueId = c.IssueId
+            WHERE c.Field = 'status'
+              AND i.IssueKey IN (%s)
+            GROUP BY i.IssueKey
+            """.formatted(keyPlaceholders);
+
+        try (Connection conn = this.connect();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            int idx = 1;
+
+            for (String key : issueKeys) {
+                stmt.setString(idx++, key);
+            }
+
+            try (ResultSet rs = stmt.executeQuery()) {
+
+                while (rs.next()) {
+                    result.put(
+                        rs.getString("IssueKey"),
+                        rs.getObject("last_change", LocalDateTime.class)
+                    );
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("[MySQL] getLastStatusChangeDates error: " + e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
      * Returns all issues from {@code IssuesInfo} with their last known status and developer.
      * Useful for developer-level statistics across all statuses.
      *

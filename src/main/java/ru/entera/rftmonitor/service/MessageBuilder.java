@@ -2,6 +2,8 @@ package ru.entera.rftmonitor.service;
 
 import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.model.Issue;
+import ru.entera.rftmonitor.model.StaleIssue;
+import ru.entera.rftmonitor.model.StaleReport;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
@@ -188,9 +190,69 @@ public final class MessageBuilder {
         return sb.toString().stripTrailing();
     }
 
+    /**
+     * Builds a stale issues report with three categories.
+     *
+     * @param report stale report with categorized lists
+     * @return HTML-formatted message
+     */
+    public String buildStaleReport(StaleReport report) {
+
+        if (report.inProgress().isEmpty() && report.longQueue().isEmpty() && report.abandoned().isEmpty()) {
+
+            return "✅ Зависших задач не обнаружено";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("<b>⚠️ Зависшие задачи</b>\n\n");
+
+        if (!report.inProgress().isEmpty()) {
+            sb.append("🔧 <b>В работе &gt; ").append(AppConfig.STALE_IN_PROGRESS_DAYS)
+                .append(" дн. (").append(report.inProgress().size()).append(" шт.)</b>\n");
+
+            for (StaleIssue issue : report.inProgress()) {
+                sb.append("  ").append(this.formatStaleIssueLine(issue)).append("\n");
+            }
+
+            sb.append("\n");
+        }
+
+        if (!report.longQueue().isEmpty()) {
+            sb.append("🕐 <b>Долгая очередь &gt; ").append(AppConfig.STALE_QUEUE_DAYS)
+                .append(" дн. (").append(report.longQueue().size()).append(" шт.)</b>\n");
+
+            for (StaleIssue issue : report.longQueue()) {
+                sb.append("  ").append(this.formatStaleIssueLine(issue)).append("\n");
+            }
+
+            sb.append("\n");
+        }
+
+        if (!report.abandoned().isEmpty()) {
+            sb.append("💀 <b>Покинутые &gt; ").append(AppConfig.STALE_ABANDONED_DAYS)
+                .append(" дн. (").append(report.abandoned().size()).append(" шт.)</b>\n");
+
+            for (StaleIssue issue : report.abandoned()) {
+                sb.append("  ").append(this.formatStaleIssueLine(issue)).append("\n");
+            }
+        }
+
+        return sb.toString().stripTrailing();
+    }
+
     //endregion
 
     //region Private
+
+    private String formatStaleIssueLine(StaleIssue issue) {
+
+        String spStr = issue.getStoryPoints() != null ? " | " + issue.getStoryPoints() + " SP" : "";
+
+        return "• <a href=\"" + issue.getUrl() + "\">" + issue.getKey() + "</a>"
+            + " — <b>" + issue.getDaysSinceChange() + " дн.</b>"
+            + " [" + issue.getStatus() + "]"
+            + "  " + issue.getAssignee() + spStr;
+    }
 
     private String buildStatusSection(String status, String emoji, List<Issue> issues, OptionalDouble p70) {
 

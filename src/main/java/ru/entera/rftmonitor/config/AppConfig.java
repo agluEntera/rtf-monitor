@@ -19,6 +19,34 @@ public final class AppConfig {
         "In Testing"
     );
 
+    /** Статусы активной работы для категории "В работе более N дней". */
+    public static final List<String> STALE_IN_PROGRESS_STATUSES = List.of(
+        "In Progress",
+        "In Review",
+        "In Testing"
+    );
+
+    /** Статусы очереди для категории "Долгая очередь". */
+    public static final List<String> STALE_QUEUE_STATUSES = List.of(
+        "Ready for Review",
+        "Ready for Testing"
+    );
+
+    /** Терминальные статусы — исключаются из категории "Покинутые задачи". */
+    public static final List<String> TERMINAL_STATUSES = List.of(
+        "Done",
+        "Closed"
+    );
+
+    /** Порог в рабочих днях для категории "В работе". */
+    public static final int STALE_IN_PROGRESS_DAYS = 2;
+
+    /** Порог в рабочих днях для категории "Долгая очередь". */
+    public static final int STALE_QUEUE_DAYS = 4;
+
+    /** Порог в рабочих днях для категории "Покинутые задачи". */
+    public static final int STALE_ABANDONED_DAYS = 8;
+
     private static final String DEFAULT_JIRA_URL = "https://entera.atlassian.net";
     private static final int DEFAULT_THRESHOLD = 4;
     private static final int DEFAULT_TARGET_PERCENT = 70;

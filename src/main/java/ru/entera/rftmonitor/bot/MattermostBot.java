@@ -6,6 +6,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.model.Issue;
+import ru.entera.rftmonitor.model.StaleReport;
 import ru.entera.rftmonitor.service.IssueService;
 import ru.entera.rftmonitor.service.MattermostMessageBuilder;
 import java.io.IOException;
@@ -30,6 +31,7 @@ import java.util.stream.Collectors;
  *   <li>{@code /rft-status}  — полный отчёт по всем статусам</li>
  *   <li>{@code /rft-overdue} — только просроченные задачи</li>
  *   <li>{@code /rft-stats}   — статистика по тестировщикам</li>
+ *   <li>{@code /rft-stale}   — зависшие задачи по категориям</li>
  * </ul>
  * <p>
  * Для активации установи {@code MATTERMOST_ENABLED=true} в .env.
@@ -126,14 +128,22 @@ public final class MattermostBot {
     private String route(String command) {
 
         try {
-            List<Issue> issues = this.issueService.getIssues();
-            Map<String, OptionalDouble> p70ByStatus = this.buildP70Map();
+            List<Issue> issues = "/rft-stale".equals(command)
+                ? List.of()
+                : this.issueService.getIssues();
+            Map<String, OptionalDouble> p70ByStatus = "/rft-stale".equals(command)
+                ? Map.of()
+                : this.buildP70Map();
 
             String text = switch (command) {
                 case "/rft-status"  -> this.messageBuilder.buildFullReport(issues, p70ByStatus);
                 case "/rft-overdue" -> this.messageBuilder.buildOverdueReport(issues);
                 case "/rft-stats"   -> this.messageBuilder.buildStatsReport(issues, p70ByStatus);
-                default             -> "Неизвестная команда. Доступны: /rft-status, /rft-overdue, /rft-stats";
+                case "/rft-stale"   -> {
+                    StaleReport staleReport = this.issueService.getStaleReport();
+                    yield this.messageBuilder.buildStaleReport(staleReport);
+                }
+                default -> "Неизвестная команда. Доступны: /rft-status, /rft-overdue, /rft-stats, /rft-stale";
             };
 
             return this.responseJson(RESPONSE_TYPE_IN_CHANNEL, text);

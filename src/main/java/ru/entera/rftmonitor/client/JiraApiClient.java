@@ -68,7 +68,7 @@ public final class JiraApiClient {
     //region Public
 
     /**
-     * Fetches all issues in monitored statuses from Jira.
+     * Fetches all issues in monitored RFT statuses from Jira.
      * Changelog (entered-at date) is not fetched here — use {@link ru.entera.rftmonitor.client.MySqlRepository}.
      *
      * @return list of raw issue data
@@ -76,31 +76,54 @@ public final class JiraApiClient {
      */
     public List<RawIssue> fetchIssues() {
 
-        List<String> statuses = config.MONITORED_STATUSES;
-        String jqlStatuses = String.join(", ", statuses.stream()
-            .map(s -> "\"" + s + "\"")
-            .toList());
+        List<String> statuses = AppConfig.MONITORED_STATUSES;
+        String jqlStatuses = statuses.stream().map(s -> "\"" + s + "\"").collect(java.util.stream.Collectors.joining(", "));
 
-        ObjectNode body = this.objectMapper.createObjectNode();
-        body.put("jql", "status in (" + jqlStatuses + ") ORDER BY created ASC");
-        body.put("maxResults", 200);
+        return this.fetchByJql("status in (" + jqlStatuses + ") ORDER BY created ASC", 200);
+    }
 
-        ArrayNode fields = body.putArray("fields");
-        fields.add("summary");
-        fields.add("assignee");
-        fields.add("issuetype");
-        fields.add(STORY_POINTS_FIELD);
-        fields.add("created");
-        fields.add("status");
+    /**
+     * Fetches all active (non-terminal) issues from Jira for staleness analysis.
+     * Terminal statuses (Done, Closed) are excluded.
+     *
+     * @return list of raw issue data
+     * @throws RuntimeException if the API call fails
+     */
+    public List<RawIssue> fetchAllActiveIssues() {
 
-        String url = this.config.getJiraUrl() + SEARCH_PATH;
+        List<String> terminal = AppConfig.TERMINAL_STATUSES;
+        String excluded = terminal.stream().map(s -> "\"" + s + "\"").collect(java.util.stream.Collectors.joining(", "));
+
+        return this.fetchByJql("status not in (" + excluded + ") ORDER BY updated ASC", 500);
+    }
+
+    //endregion
+
+    //region Private
+
+    private List<RawIssue> fetchByJql(String jql, int maxResults) {
 
         try {
+            ObjectNode body = this.objectMapper.createObjectNode();
+            body.put("jql", jql);
+            body.put("maxResults", maxResults);
+            body.put("startAt", 0);
+
+            ArrayNode fields = this.objectMapper.createArrayNode();
+            fields.add("summary");
+            fields.add("status");
+            fields.add("issuetype");
+            fields.add("assignee");
+            fields.add(STORY_POINTS_FIELD);
+            fields.add("created");
+            body.set("fields", fields);
+
             HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
+                .uri(URI.create(this.config.getJiraUrl() + SEARCH_PATH))
                 .header("Authorization", this.authHeader)
-                .POST(HttpRequest.BodyPublishers.ofString(this.objectMapper.writeValueAsString(body)))
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
                 .build();
 
             HttpResponse<String> response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -109,17 +132,15 @@ public final class JiraApiClient {
                 throw new RuntimeException("Jira API error: " + response.statusCode() + " — " + response.body());
             }
 
-            return this.parseIssues(this.objectMapper.readTree(response.body()));
+            JsonNode root = this.objectMapper.readTree(response.body());
+
+            return this.parseIssues(root);
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to fetch issues from Jira", e);
+            throw new RuntimeException("Failed to fetch Jira issues: " + e.getMessage(), e);
         }
     }
-
-    //endregion
-
-    //region Private
 
     private List<RawIssue> parseIssues(JsonNode root) {
 

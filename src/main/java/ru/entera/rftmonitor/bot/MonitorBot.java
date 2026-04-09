@@ -9,6 +9,7 @@ import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.model.Issue;
+import ru.entera.rftmonitor.model.StaleReport;
 import ru.entera.rftmonitor.service.IssueService;
 import ru.entera.rftmonitor.service.MessageBuilder;
 import java.util.HashMap;
@@ -25,6 +26,7 @@ import java.util.OptionalDouble;
  *   <li>{@code /status} — full report by status</li>
  *   <li>{@code /overdue} — overdue issues only</li>
  *   <li>{@code /stats} — statistics by assignee</li>
+ *   <li>{@code /stale} — stale issues by category</li>
  * </ul>
  */
 public final class MonitorBot extends TelegramLongPollingBot {
@@ -74,6 +76,7 @@ public final class MonitorBot extends TelegramLongPollingBot {
                 BotCommand.builder().command("status").description("Полный отчёт по всем статусам").build(),
                 BotCommand.builder().command("overdue").description("Только просроченные задачи").build(),
                 BotCommand.builder().command("stats").description("Статистика по тестировщикам").build(),
+                BotCommand.builder().command("stale").description("Зависшие задачи по категориям").build(),
                 BotCommand.builder().command("help").description("Список команд").build()
             ))
             .build();
@@ -104,6 +107,8 @@ public final class MonitorBot extends TelegramLongPollingBot {
             this.handleOverdue(chatId);
         } else if (text.startsWith("/stats")) {
             this.handleStats(chatId);
+        } else if (text.startsWith("/stale")) {
+            this.handleStale(chatId);
         }
     }
 
@@ -117,7 +122,8 @@ public final class MonitorBot extends TelegramLongPollingBot {
             "<b>RFT Monitor</b> — мониторинг задач в тестировании\n\n"
             + "/status — полный отчёт по всем статусам\n"
             + "/overdue — только просроченные задачи\n"
-            + "/stats — статистика по тестировщикам"
+            + "/stats — статистика по тестировщикам\n"
+            + "/stale — зависшие задачи по категориям"
         );
     }
 
@@ -128,9 +134,14 @@ public final class MonitorBot extends TelegramLongPollingBot {
         try {
             List<Issue> issues = this.issueService.getIssues();
             Map<String, OptionalDouble> p70ByStatus = this.buildP70Map();
-            String message = this.messageBuilder.buildFullReport(issues, p70ByStatus);
+            String fullReport = this.messageBuilder.buildFullReport(issues, p70ByStatus);
 
-            this.send(chatId, message);
+            this.send(chatId, fullReport);
+
+            StaleReport staleReport = this.issueService.getStaleReport();
+            String staleMessage = this.messageBuilder.buildStaleReport(staleReport);
+
+            this.send(chatId, staleMessage);
         } catch (Exception e) {
             this.send(chatId, "❌ Ошибка: " + e.getMessage());
         }
@@ -158,6 +169,20 @@ public final class MonitorBot extends TelegramLongPollingBot {
             List<Issue> issues = this.issueService.getIssues();
             Map<String, OptionalDouble> p70ByStatus = this.buildP70Map();
             String message = this.messageBuilder.buildStatsReport(issues, p70ByStatus);
+
+            this.send(chatId, message);
+        } catch (Exception e) {
+            this.send(chatId, "❌ Ошибка: " + e.getMessage());
+        }
+    }
+
+    private void handleStale(long chatId) {
+
+        this.send(chatId, "⏳ Собираю данные...");
+
+        try {
+            StaleReport report = this.issueService.getStaleReport();
+            String message = this.messageBuilder.buildStaleReport(report);
 
             this.send(chatId, message);
         } catch (Exception e) {
