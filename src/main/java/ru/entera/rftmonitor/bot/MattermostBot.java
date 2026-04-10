@@ -162,14 +162,14 @@ public final class MattermostBot {
 
     private boolean isTokenValid(String token) {
 
-        String expected = this.config.getMattermostToken();
+        java.util.Set<String> tokens = this.config.getMattermostTokens();
 
-        if (expected == null || expected.isEmpty()) {
+        if (tokens.isEmpty()) {
             System.err.println("[Mattermost] MATTERMOST_TOKEN не настроен — все запросы отклонены");
             return false;
         }
 
-        return expected.equals(token);
+        return tokens.contains(token);
     }
 
     private Map<String, String> parseBody(HttpExchange exchange) throws IOException {

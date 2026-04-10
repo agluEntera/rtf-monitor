@@ -92,7 +92,7 @@ public class AppConfig {
     private final boolean mattermostEnabled;
     private final String mattermostUrl;
     private final int mattermostPort;
-    private final String mattermostToken;
+    private final java.util.Set<String> mattermostTokens;
 
     //endregion
 
@@ -128,7 +128,11 @@ public class AppConfig {
         this.mattermostEnabled = Boolean.parseBoolean(dotenv.get("MATTERMOST_ENABLED", "false"));
         this.mattermostUrl = dotenv.get("MATTERMOST_URL", DEFAULT_MATTERMOST_URL);
         this.mattermostPort = Integer.parseInt(dotenv.get("MATTERMOST_PORT", String.valueOf(DEFAULT_MATTERMOST_PORT)));
-        this.mattermostToken = dotenv.get("MATTERMOST_TOKEN", "");
+        String rawTokens = dotenv.get("MATTERMOST_TOKEN", "");
+        this.mattermostTokens = java.util.Arrays.stream(rawTokens.split(","))
+            .map(String::trim)
+            .filter(t -> !t.isEmpty())
+            .collect(java.util.stream.Collectors.toSet());
 
         String rawProxy = System.getenv("https_proxy");
 
