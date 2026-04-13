@@ -144,15 +144,8 @@ public final class MonitorBot extends TelegramLongPollingBot {
 
         try {
             List<Issue> issues = this.issueService.getIssues();
-            Map<String, OptionalDouble> p70ByStatus = this.buildP70Map();
-            String fullReport = this.messageBuilder.buildFullReport(issues, p70ByStatus);
-
-            this.send(chatId, fullReport);
-
-            StaleReport staleReport = this.issueService.getStaleReport();
-            String staleMessage = this.messageBuilder.buildStaleReport(staleReport);
-
-            this.send(chatId, staleMessage);
+            this.send(chatId, this.messageBuilder.buildFullReport(issues, Map.of()));
+            this.send(chatId, this.messageBuilder.buildStaleReport(this.issueService.getStaleReport()));
         } catch (Exception e) {
             this.send(chatId, "❌ Ошибка: " + e.getMessage());
         }
@@ -164,8 +157,7 @@ public final class MonitorBot extends TelegramLongPollingBot {
 
         try {
             List<Issue> issues = this.issueService.getIssues();
-            Map<String, OptionalDouble> p70ByStatus = this.buildP70Map();
-            this.send(chatId, this.messageBuilder.buildGroupReport(issues, p70ByStatus, AppConfig.REVIEW_STATUSES));
+            this.send(chatId, this.messageBuilder.buildGroupReport(issues, Map.of(), AppConfig.REVIEW_STATUSES));
         } catch (Exception e) {
             this.send(chatId, "❌ Ошибка: " + e.getMessage());
         }
@@ -177,8 +169,7 @@ public final class MonitorBot extends TelegramLongPollingBot {
 
         try {
             List<Issue> issues = this.issueService.getIssues();
-            Map<String, OptionalDouble> p70ByStatus = this.buildP70Map();
-            this.send(chatId, this.messageBuilder.buildGroupReport(issues, p70ByStatus, AppConfig.TESTING_STATUSES));
+            this.send(chatId, this.messageBuilder.buildGroupReport(issues, Map.of(), AppConfig.TESTING_STATUSES));
         } catch (Exception e) {
             this.send(chatId, "❌ Ошибка: " + e.getMessage());
         }
