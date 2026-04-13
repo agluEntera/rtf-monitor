@@ -2,10 +2,14 @@ package ru.entera.rftmonitor.bot;
 
 import org.telegram.telegrambots.bots.DefaultBotOptions;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.model.Issue;
@@ -22,17 +26,14 @@ import java.util.Optional;
 
 /**
  * Telegram long-polling bot for RFT monitoring.
- * <p>
- * Supported commands:
- * <ul>
- *   <li>{@code /start}, {@code /help} — command list</li>
- *   <li>{@code /status} — full report by status</li>
- *   <li>{@code /review} — report for Ready for Review + Under Review</li>
- *   <li>{@code /testing} — report for Ready for Testing + In Testing</li>
- *   <li>{@code /stale} — stale issues by category</li>
- * </ul>
  */
 public final class MonitorBot extends TelegramLongPollingBot {
+
+    //region Constants
+
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+
+    //endregion
 
     //region Fields
 
@@ -44,12 +45,6 @@ public final class MonitorBot extends TelegramLongPollingBot {
 
     //region Ctor
 
-    /**
-     * @param options        bot options (proxy, timeouts)
-     * @param config         application configuration
-     * @param issueService   service for fetching and enriching issues
-     * @param messageBuilder service for building Telegram messages
-     */
     public MonitorBot(DefaultBotOptions options, AppConfig config, IssueService issueService, MessageBuilder messageBuilder) {
 
         super(options, config.getTelegramBotToken());
@@ -68,10 +63,6 @@ public final class MonitorBot extends TelegramLongPollingBot {
         return "enterajirabot";
     }
 
-    /**
-     * Registers bot commands so they appear in the Telegram menu (the "/" button).
-     * Call once after the bot is registered with {@link org.telegram.telegrambots.meta.TelegramBotsApi}.
-     */
     public void registerCommands() {
 
         SetMyCommands setMyCommands = SetMyCommands.builder()
@@ -80,7 +71,7 @@ public final class MonitorBot extends TelegramLongPollingBot {
                 BotCommand.builder().command("review").description("Отчёт: Ready for Review + Under Review").build(),
                 BotCommand.builder().command("testing").description("Отчёт: Ready for Testing + In Testing").build(),
                 BotCommand.builder().command("stale").description("Зависшие задачи по категориям").build(),
-                BotCommand.builder().command("history").description("История: /history [dd.MM.yyyy dd.MM.yyyy [%]]").build(),
+                BotCommand.builder().command("history").description("Историческая статистика по статусам").build(),
                 BotCommand.builder().command("help").description("Список команд").build()
             ))
             .build();
@@ -95,6 +86,11 @@ public final class MonitorBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
+
+        if (update.hasCallbackQuery()) {
+            this.handleCallbackQuery(update.getCallbackQuery());
+            return;
+        }
 
         if (!update.hasMessage() || !update.getMessage().hasText()) {
             return;
@@ -121,9 +117,7 @@ public final class MonitorBot extends TelegramLongPollingBot {
 
     //endregion
 
-    //region Private
-
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+    //region Private — command handlers
 
     private void handleHelp(long chatId) {
 
@@ -133,8 +127,7 @@ public final class MonitorBot extends TelegramLongPollingBot {
             + "/review — отчёт: Ready for Review + Under Review\n"
             + "/testing — отчёт: Ready for Testing + In Testing\n"
             + "/stale — зависшие задачи по категориям\n"
-            + "/history [dd.MM.yyyy dd.MM.yyyy [персентиль]] — историческая статистика\n"
-            + "  Пример: /history 01.01.2025 31.03.2025 70"
+            + "/history — историческая статистика (кнопки выбора)"
         );
     }
 
@@ -180,55 +173,148 @@ public final class MonitorBot extends TelegramLongPollingBot {
         this.send(chatId, "⏳ Собираю данные...");
 
         try {
-            StaleReport report = this.issueService.getStaleReport();
-            String message = this.messageBuilder.buildStaleReport(report);
-
-            this.send(chatId, message);
+            this.send(chatId, this.messageBuilder.buildStaleReport(this.issueService.getStaleReport()));
         } catch (Exception e) {
             this.send(chatId, "❌ Ошибка: " + e.getMessage());
         }
     }
 
+    /**
+     * /history without args — shows quick-pick inline keyboard.
+     * /history with args — parses directly (e.g. /history 01.01.2025 31.03.2025 70).
+     */
     private void handleHistory(long chatId, String args) {
 
-        this.send(chatId, "⏳ Собираю данные...");
+        if (!args.isBlank()) {
+            this.computeAndSendHistory(chatId, args);
+            return;
+        }
+
+        // No args — show quick-pick keyboard
+        InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder()
+            .keyboardRow(List.of(
+                btn("30 дн · P50",  "hist:30:50"),
+                btn("30 дн · P70",  "hist:30:70"),
+                btn("30 дн · P90",  "hist:30:90"),
+                btn("30 дн · P95",  "hist:30:95")
+            ))
+            .keyboardRow(List.of(
+                btn("3 мес · P50",  "hist:90:50"),
+                btn("3 мес · P70",  "hist:90:70"),
+                btn("3 мес · P90",  "hist:90:90"),
+                btn("3 мес · P95",  "hist:90:95")
+            ))
+            .keyboardRow(List.of(
+                btn("6 мес · P70",  "hist:180:70"),
+                btn("1 год · P70",  "hist:365:70"),
+                btn("1 год · P90",  "hist:365:90")
+            ))
+            .build();
+
+        try {
+            this.execute(SendMessage.builder()
+                .chatId(chatId)
+                .text("📊 <b>История статусов</b>\n\nВыберите период и персентиль:")
+                .parseMode("HTML")
+                .replyMarkup(markup)
+                .build());
+        } catch (TelegramApiException e) {
+            System.err.println("[Telegram] Send error: " + e.getMessage());
+        }
+    }
+
+    //endregion
+
+    //region Private — callback query (inline button press)
+
+    private void handleCallbackQuery(CallbackQuery callbackQuery) {
+
+        String data   = callbackQuery.getData();
+        long   chatId = callbackQuery.getMessage().getChatId();
+
+        // Acknowledge immediately — removes the loading spinner on the button
+        try {
+            this.execute(AnswerCallbackQuery.builder()
+                .callbackQueryId(callbackQuery.getId())
+                .build());
+        } catch (TelegramApiException e) {
+            // non-critical
+        }
+
+        if (data != null && data.startsWith("hist:")) {
+            String[] parts = data.split(":");
+
+            int days       = Integer.parseInt(parts[1]);
+            int percentile = Integer.parseInt(parts[2]);
+
+            LocalDate to   = LocalDate.now();
+            LocalDate from = to.minusDays(days);
+
+            this.send(chatId, "⏳ Собираю данные...");
+
+            try {
+                Map<String, Optional<StatusHistoryStat>> stats =
+                    this.issueService.getHistoryReport(from, to, percentile);
+                this.send(chatId, this.messageBuilder.buildHistoryReport(stats, from, to, percentile));
+            } catch (Exception e) {
+                this.send(chatId, "❌ Ошибка: " + e.getMessage());
+            }
+        }
+    }
+
+    //endregion
+
+    //region Private — helpers
+
+    private void computeAndSendHistory(long chatId, String args) {
 
         LocalDate to = LocalDate.now();
         LocalDate from = to.minusMonths(3);
         int percentile = 70;
 
-        String[] parts = args.isBlank() ? new String[0] : args.split("\\s+");
+        String[] parts = args.split("\\s+");
 
         try {
             if (parts.length == 1) {
                 percentile = Integer.parseInt(parts[0]);
-            } else if (parts.length >= 3) {
-                from = LocalDate.parse(parts[0], DATE_FMT);
-                to = LocalDate.parse(parts[1], DATE_FMT);
-                percentile = Integer.parseInt(parts[2]);
             } else if (parts.length == 2) {
                 from = LocalDate.parse(parts[0], DATE_FMT);
-                to = LocalDate.parse(parts[1], DATE_FMT);
+                to   = LocalDate.parse(parts[1], DATE_FMT);
+            } else if (parts.length >= 3) {
+                from       = LocalDate.parse(parts[0], DATE_FMT);
+                to         = LocalDate.parse(parts[1], DATE_FMT);
+                percentile = Integer.parseInt(parts[2]);
             }
         } catch (DateTimeParseException | NumberFormatException e) {
-            this.send(chatId, "❌ Формат: /history [dd.MM.yyyy dd.MM.yyyy [персентиль]]\nПример: /history 01.01.2025 31.03.2025 70");
-
+            this.send(chatId,
+                "❌ Формат: /history [dd.MM.yyyy dd.MM.yyyy [персентиль]]\n"
+                + "Пример: /history 01.01.2025 31.03.2025 70");
             return;
         }
 
+        this.send(chatId, "⏳ Собираю данные...");
+
         try {
-            Map<String, Optional<StatusHistoryStat>> stats = this.issueService.getHistoryReport(from, to, percentile);
+            Map<String, Optional<StatusHistoryStat>> stats =
+                this.issueService.getHistoryReport(from, to, percentile);
             this.send(chatId, this.messageBuilder.buildHistoryReport(stats, from, to, percentile));
         } catch (Exception e) {
             this.send(chatId, "❌ Ошибка: " + e.getMessage());
         }
     }
 
+    private static InlineKeyboardButton btn(String text, String data) {
+
+        return InlineKeyboardButton.builder()
+            .text(text)
+            .callbackData(data)
+            .build();
+    }
+
     private void send(long chatId, String text) {
 
         if (text.length() <= 4096) {
             this.sendRaw(chatId, text);
-
             return;
         }
 
@@ -242,7 +328,6 @@ public final class MonitorBot extends TelegramLongPollingBot {
                 if (!chunk.isEmpty()) {
                     this.sendRaw(chatId, chunk.toString());
                 }
-                // Строка сама по себе длиннее лимита — режем посимвольно
                 String remaining = line;
                 while (remaining.length() > 4096) {
                     this.sendRaw(chatId, remaining.substring(0, 4096));
@@ -261,15 +346,13 @@ public final class MonitorBot extends TelegramLongPollingBot {
 
     private void sendRaw(long chatId, String text) {
 
-        SendMessage message = SendMessage.builder()
-            .chatId(chatId)
-            .text(text)
-            .parseMode("HTML")
-            .disableWebPagePreview(true)
-            .build();
-
         try {
-            this.execute(message);
+            this.execute(SendMessage.builder()
+                .chatId(chatId)
+                .text(text)
+                .parseMode("HTML")
+                .disableWebPagePreview(true)
+                .build());
         } catch (TelegramApiException e) {
             System.err.println("[Telegram] Send error: " + e.getMessage());
         }

@@ -1,6 +1,8 @@
 package ru.entera.rftmonitor.bot;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -8,9 +10,9 @@ import ru.entera.rftmonitor.client.MattermostApiClient;
 import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.model.Issue;
 import ru.entera.rftmonitor.model.StaleReport;
+import ru.entera.rftmonitor.model.StatusHistoryStat;
 import ru.entera.rftmonitor.service.IssueService;
 import ru.entera.rftmonitor.service.MattermostMessageBuilder;
-import ru.entera.rftmonitor.model.StatusHistoryStat;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -23,11 +25,9 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalDouble;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -38,24 +38,24 @@ import java.util.stream.Collectors;
  * Запускает HTTP-сервер, который принимает POST-запросы от Mattermost
  * при вводе slash-команд и возвращает отчёт в формате Markdown.
  * <p>
- * Поддерживаемые команды (настраиваются в Mattermost):
+ * Поддерживаемые команды:
  * <ul>
  *   <li>{@code /rft-status}  — полный отчёт по всем статусам</li>
- *   <li>{@code /rft-review}  — отчёт: Ready for Review + Under Review</li>
- *   <li>{@code /rft-testing} — отчёт: Ready for Testing + In Testing</li>
+ *   <li>{@code /rft-review}  — Ready for Review + Under Review</li>
+ *   <li>{@code /rft-testing} — Ready for Testing + In Testing</li>
  *   <li>{@code /rft-stale}   — зависшие задачи по категориям</li>
+ *   <li>{@code /rft-history} — интерактивный диалог: история статусов</li>
  * </ul>
- * <p>
- * Для активации установи {@code MATTERMOST_ENABLED=true} в .env.
- * Инструкция по подключению: {@code Mattermost — инструкция.md}.
  */
 public final class MattermostBot {
 
     //region Constants
 
-    private static final String ENDPOINT = "/mattermost";
+    private static final String ENDPOINT        = "/mattermost";
+    private static final String DIALOG_ENDPOINT = "/mattermost/dialog";
     private static final String RESPONSE_TYPE_IN_CHANNEL = "in_channel";
-    private static final String RESPONSE_TYPE_EPHEMERAL = "ephemeral";
+    private static final String RESPONSE_TYPE_EPHEMERAL  = "ephemeral";
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
     //endregion
 
@@ -74,11 +74,6 @@ public final class MattermostBot {
 
     //region Ctor
 
-    /**
-     * @param config         application configuration
-     * @param issueService   service for fetching and enriching issues
-     * @param messageBuilder service for building Mattermost Markdown messages
-     */
     public MattermostBot(AppConfig config, IssueService issueService, MattermostMessageBuilder messageBuilder) {
 
         this.config = config;
@@ -91,24 +86,17 @@ public final class MattermostBot {
 
     //region Public
 
-    /**
-     * Starts the HTTP server and begins accepting slash-command requests from Mattermost.
-     *
-     * @throws IOException if the server cannot bind to the configured port
-     */
     public void start() throws IOException {
 
         this.validTokens = new MattermostApiClient(this.config).registerCommands();
 
         this.server = HttpServer.create(new InetSocketAddress(this.config.getMattermostPort()), 0);
         this.server.createContext(ENDPOINT, this::handleRequest);
+        this.server.createContext(DIALOG_ENDPOINT, this::handleDialogSubmission);
         this.server.start();
         System.out.println("Mattermost Bot слушает на порту " + this.config.getMattermostPort() + ENDPOINT);
     }
 
-    /**
-     * Stops the HTTP server.
-     */
     public void stop() {
 
         if (this.server != null) {
@@ -118,13 +106,12 @@ public final class MattermostBot {
 
     //endregion
 
-    //region Private
+    //region Private — request routing
 
     private void handleRequest(HttpExchange exchange) throws IOException {
 
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             this.sendResponse(exchange, 405, this.errorJson("Method not allowed"));
-
             return;
         }
 
@@ -132,30 +119,36 @@ public final class MattermostBot {
 
         if (!this.isTokenValid(params.get("token"))) {
             this.sendResponse(exchange, 401, this.errorJson("Invalid token"));
-
             return;
         }
 
         String command = params.getOrDefault("command", "");
+
+        // /rft-history opens an interactive modal dialog.
+        // trigger_id is valid only for 3 seconds, so open the dialog synchronously
+        // before sending the HTTP response.
+        if ("/rft-history".equals(command)) {
+            this.openHistoryDialog(params);
+            this.sendResponse(exchange, 200, "{}");
+            return;
+        }
+
         String text = params.getOrDefault("text", "").trim();
         String responseUrl = params.getOrDefault("response_url", "");
 
         // Immediately acknowledge — prevents timeout in Mattermost UI
         this.sendResponse(exchange, 200, this.responseJson(RESPONSE_TYPE_EPHEMERAL, "⏳ Выполняется..."));
 
-        // Process in background and send result to response_url
         this.executor.submit(() -> {
             String result = this.route(command, text);
             this.sendDelayed(responseUrl, result);
         });
     }
 
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
-
     private String route(String command, String args) {
 
         try {
-            String responseText = switch (command) {
+            String text = switch (command) {
                 case "/rft-status" -> {
                     List<Issue> issues = this.issueService.getIssues();
                     yield this.messageBuilder.buildFullReport(issues, Map.of());
@@ -169,42 +162,178 @@ public final class MattermostBot {
                     yield this.messageBuilder.buildGroupReport(issues, Map.of(), AppConfig.TESTING_STATUSES);
                 }
                 case "/rft-stale" -> this.messageBuilder.buildStaleReport(this.issueService.getStaleReport());
-                case "/rft-history" -> this.handleHistory(args);
-                default -> "Неизвестная команда. Доступны: /rft-status, /rft-review, /rft-testing, /rft-stale, /rft-history";
+                default -> "Неизвестная команда: " + command;
             };
 
-            return this.responseJson(RESPONSE_TYPE_IN_CHANNEL, responseText);
+            return this.responseJson(RESPONSE_TYPE_IN_CHANNEL, text);
         } catch (Exception e) {
             return this.responseJson(RESPONSE_TYPE_EPHEMERAL, "❌ Ошибка: " + e.getMessage());
         }
     }
 
-    private String handleHistory(String args) {
+    //endregion
 
-        LocalDate to = LocalDate.now();
-        LocalDate from = to.minusMonths(3);
-        int percentile = 70;
+    //region Private — interactive dialog for /rft-history
 
-        String[] parts = args.isBlank() ? new String[0] : args.split("\\s+");
+    /**
+     * Opens a Mattermost interactive modal dialog for the history command.
+     * Uses {@code trigger_id} from the slash-command POST; valid for 3 seconds.
+     * The {@code response_url} is passed as dialog state so the submission handler
+     * can POST the result back to the correct channel.
+     */
+    private void openHistoryDialog(Map<String, String> params) {
 
-        try {
-            if (parts.length == 1) {
-                percentile = Integer.parseInt(parts[0]);
-            } else if (parts.length >= 3) {
-                from = LocalDate.parse(parts[0], DATE_FMT);
-                to = LocalDate.parse(parts[1], DATE_FMT);
-                percentile = Integer.parseInt(parts[2]);
-            } else if (parts.length == 2) {
-                from = LocalDate.parse(parts[0], DATE_FMT);
-                to = LocalDate.parse(parts[1], DATE_FMT);
-            }
-        } catch (DateTimeParseException | NumberFormatException e) {
-            return "❌ Формат: `/rft-history [dd.MM.yyyy dd.MM.yyyy [персентиль]]`\nПример: `/rft-history 01.01.2025 31.03.2025 70`";
+        String triggerId = params.getOrDefault("trigger_id", "");
+        String responseUrl = params.getOrDefault("response_url", "");
+
+        if (triggerId.isBlank() || this.config.getMattermostBotUrl().isBlank()) {
+            System.err.println("[Mattermost] Cannot open dialog: trigger_id or botUrl is blank");
+            return;
         }
 
-        Map<String, Optional<StatusHistoryStat>> stats = this.issueService.getHistoryReport(from, to, percentile);
+        LocalDate today = LocalDate.now();
+        LocalDate defaultFrom = today.minusMonths(3);
 
-        return this.messageBuilder.buildHistoryReport(stats, from, to, percentile);
+        try {
+            ObjectNode payload = this.objectMapper.createObjectNode();
+            payload.put("trigger_id", triggerId);
+            payload.put("url", this.config.getMattermostBotUrl() + DIALOG_ENDPOINT);
+
+            ObjectNode dialog = this.objectMapper.createObjectNode();
+            dialog.put("title", "История статусов");
+            dialog.put("submit_label", "Показать");
+            dialog.put("state", responseUrl);
+
+            ArrayNode elements = this.objectMapper.createArrayNode();
+
+            elements.add(this.textElement("from_date", "Дата начала", "дд.ММ.гггг", defaultFrom.format(DATE_FMT)));
+            elements.add(this.textElement("to_date",   "Дата конца",  "дд.ММ.гггг", today.format(DATE_FMT)));
+
+            ObjectNode pctEl = this.objectMapper.createObjectNode();
+            pctEl.put("type", "select");
+            pctEl.put("name", "percentile");
+            pctEl.put("display_name", "Персентиль");
+            pctEl.put("default", "70");
+
+            ArrayNode options = this.objectMapper.createArrayNode();
+            this.addOption(options, "P50 — медиана",          "50");
+            this.addOption(options, "P70 (рекомендуется)",    "70");
+            this.addOption(options, "P90",                    "90");
+            this.addOption(options, "P95",                    "95");
+            pctEl.set("options", options);
+            elements.add(pctEl);
+
+            dialog.set("elements", elements);
+            payload.set("dialog", dialog);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(this.config.getMattermostUrl() + "/api/v4/actions/dialogs/open"))
+                .header("Content-Type", "application/json; charset=utf-8")
+                .header("Authorization", "Bearer " + this.config.getMattermostToken())
+                .POST(HttpRequest.BodyPublishers.ofString(
+                    this.objectMapper.writeValueAsString(payload), StandardCharsets.UTF_8))
+                .build();
+
+            this.httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+        } catch (Exception e) {
+            System.err.println("[Mattermost] Failed to open history dialog: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Handles the form submission from the history dialog.
+     * Validates inputs, computes stats, and POSTs the result to the channel via response_url.
+     */
+    private void handleDialogSubmission(HttpExchange exchange) throws IOException {
+
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(405, -1);
+            return;
+        }
+
+        String bodyStr = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+
+        JsonNode body;
+        try {
+            body = this.objectMapper.readTree(bodyStr);
+        } catch (Exception e) {
+            this.sendResponse(exchange, 400, "{}");
+            return;
+        }
+
+        JsonNode submission = body.path("submission");
+        String responseUrl  = body.path("state").asText("");
+
+        String fromStr = submission.path("from_date").asText("").trim();
+        String toStr   = submission.path("to_date").asText("").trim();
+        String pctStr  = submission.path("percentile").asText("70");
+
+        // Validate — return field-level errors directly in the dialog
+        LocalDate from, to;
+        try {
+            from = LocalDate.parse(fromStr, DATE_FMT);
+        } catch (DateTimeParseException e) {
+            this.sendResponse(exchange, 200,
+                "{\"errors\":{\"from_date\":\"Неверный формат — используйте дд.ММ.гггг\"}}");
+            return;
+        }
+
+        try {
+            to = LocalDate.parse(toStr, DATE_FMT);
+        } catch (DateTimeParseException e) {
+            this.sendResponse(exchange, 200,
+                "{\"errors\":{\"to_date\":\"Неверный формат — используйте дд.ММ.гггг\"}}");
+            return;
+        }
+
+        int percentile;
+        try {
+            percentile = Integer.parseInt(pctStr);
+        } catch (NumberFormatException e) {
+            percentile = 70;
+        }
+
+        // Close the dialog
+        this.sendResponse(exchange, 200, "{}");
+
+        // Compute and post result asynchronously
+        final LocalDate f = from, t = to;
+        final int p = percentile;
+
+        this.executor.submit(() -> {
+            try {
+                Map<String, Optional<StatusHistoryStat>> stats = this.issueService.getHistoryReport(f, t, p);
+                String text = this.messageBuilder.buildHistoryReport(stats, f, t, p);
+                this.sendDelayed(responseUrl, this.responseJson(RESPONSE_TYPE_IN_CHANNEL, text));
+            } catch (Exception e) {
+                this.sendDelayed(responseUrl,
+                    this.responseJson(RESPONSE_TYPE_EPHEMERAL, "❌ Ошибка: " + e.getMessage()));
+            }
+        });
+    }
+
+    //endregion
+
+    //region Private — helpers
+
+    private ObjectNode textElement(String name, String displayName, String placeholder, String defaultVal) {
+
+        ObjectNode el = this.objectMapper.createObjectNode();
+        el.put("type", "text");
+        el.put("name", name);
+        el.put("display_name", displayName);
+        el.put("placeholder", placeholder);
+        el.put("default", defaultVal);
+
+        return el;
+    }
+
+    private void addOption(ArrayNode options, String text, String value) {
+
+        ObjectNode opt = this.objectMapper.createObjectNode();
+        opt.put("text", text);
+        opt.put("value", value);
+        options.add(opt);
     }
 
     private void sendDelayed(String responseUrl, String json) {
