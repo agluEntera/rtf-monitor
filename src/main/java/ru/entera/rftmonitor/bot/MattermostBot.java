@@ -4,20 +4,32 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import ru.entera.rftmonitor.client.MattermostApiClient;
 import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.model.Issue;
 import ru.entera.rftmonitor.model.StaleReport;
 import ru.entera.rftmonitor.service.IssueService;
 import ru.entera.rftmonitor.service.MattermostMessageBuilder;
+import ru.entera.rftmonitor.model.StatusHistoryStat;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.URLDecoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalDouble;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 /**
@@ -54,6 +66,9 @@ public final class MattermostBot {
     private final MattermostMessageBuilder messageBuilder;
     private final ObjectMapper objectMapper;
     private HttpServer server;
+    private java.util.Set<String> validTokens = new java.util.HashSet<>();
+    private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final HttpClient httpClient = HttpClient.newBuilder().build();
 
     //endregion
 
@@ -82,6 +97,8 @@ public final class MattermostBot {
      * @throws IOException if the server cannot bind to the configured port
      */
     public void start() throws IOException {
+
+        this.validTokens = new MattermostApiClient(this.config).registerCommands();
 
         this.server = HttpServer.create(new InetSocketAddress(this.config.getMattermostPort()), 0);
         this.server.createContext(ENDPOINT, this::handleRequest);
@@ -120,56 +137,98 @@ public final class MattermostBot {
         }
 
         String command = params.getOrDefault("command", "");
-        String responseJson = this.route(command);
+        String text = params.getOrDefault("text", "").trim();
+        String responseUrl = params.getOrDefault("response_url", "");
 
-        this.sendResponse(exchange, 200, responseJson);
+        // Immediately acknowledge — prevents timeout in Mattermost UI
+        this.sendResponse(exchange, 200, this.responseJson(RESPONSE_TYPE_EPHEMERAL, "⏳ Выполняется..."));
+
+        // Process in background and send result to response_url
+        this.executor.submit(() -> {
+            String result = this.route(command, text);
+            this.sendDelayed(responseUrl, result);
+        });
     }
 
-    private String route(String command) {
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+
+    private String route(String command, String args) {
 
         try {
-            boolean isStale = "/rft-stale".equals(command);
-            List<Issue> issues = isStale ? List.of() : this.issueService.getIssues();
-            Map<String, OptionalDouble> p70ByStatus = isStale ? Map.of() : this.buildP70Map();
-
-            String text = switch (command) {
-                case "/rft-status"  -> this.messageBuilder.buildFullReport(issues, p70ByStatus);
-                case "/rft-review"  -> this.messageBuilder.buildGroupReport(issues, p70ByStatus, AppConfig.REVIEW_STATUSES);
-                case "/rft-testing" -> this.messageBuilder.buildGroupReport(issues, p70ByStatus, AppConfig.TESTING_STATUSES);
-                case "/rft-stale"   -> {
-                    StaleReport staleReport = this.issueService.getStaleReport();
-                    yield this.messageBuilder.buildStaleReport(staleReport);
+            String responseText = switch (command) {
+                case "/rft-status" -> {
+                    List<Issue> issues = this.issueService.getIssues();
+                    yield this.messageBuilder.buildFullReport(issues, Map.of());
                 }
-                default -> "Неизвестная команда. Доступны: /rft-status, /rft-review, /rft-testing, /rft-stale";
+                case "/rft-review" -> {
+                    List<Issue> issues = this.issueService.getIssues();
+                    yield this.messageBuilder.buildGroupReport(issues, Map.of(), AppConfig.REVIEW_STATUSES);
+                }
+                case "/rft-testing" -> {
+                    List<Issue> issues = this.issueService.getIssues();
+                    yield this.messageBuilder.buildGroupReport(issues, Map.of(), AppConfig.TESTING_STATUSES);
+                }
+                case "/rft-stale" -> this.messageBuilder.buildStaleReport(this.issueService.getStaleReport());
+                case "/rft-history" -> this.handleHistory(args);
+                default -> "Неизвестная команда. Доступны: /rft-status, /rft-review, /rft-testing, /rft-stale, /rft-history";
             };
 
-            return this.responseJson(RESPONSE_TYPE_IN_CHANNEL, text);
+            return this.responseJson(RESPONSE_TYPE_IN_CHANNEL, responseText);
         } catch (Exception e) {
             return this.responseJson(RESPONSE_TYPE_EPHEMERAL, "❌ Ошибка: " + e.getMessage());
         }
     }
 
-    private Map<String, OptionalDouble> buildP70Map() {
+    private String handleHistory(String args) {
 
-        Map<String, OptionalDouble> p70ByStatus = new HashMap<>();
+        LocalDate to = LocalDate.now();
+        LocalDate from = to.minusMonths(3);
+        int percentile = 70;
 
-        for (String status : AppConfig.MONITORED_STATUSES) {
-            p70ByStatus.put(status, this.issueService.getP70(status));
+        String[] parts = args.isBlank() ? new String[0] : args.split("\\s+");
+
+        try {
+            if (parts.length == 1) {
+                percentile = Integer.parseInt(parts[0]);
+            } else if (parts.length >= 3) {
+                from = LocalDate.parse(parts[0], DATE_FMT);
+                to = LocalDate.parse(parts[1], DATE_FMT);
+                percentile = Integer.parseInt(parts[2]);
+            } else if (parts.length == 2) {
+                from = LocalDate.parse(parts[0], DATE_FMT);
+                to = LocalDate.parse(parts[1], DATE_FMT);
+            }
+        } catch (DateTimeParseException | NumberFormatException e) {
+            return "❌ Формат: `/rft-history [dd.MM.yyyy dd.MM.yyyy [персентиль]]`\nПример: `/rft-history 01.01.2025 31.03.2025 70`";
         }
 
-        return p70ByStatus;
+        Map<String, Optional<StatusHistoryStat>> stats = this.issueService.getHistoryReport(from, to, percentile);
+
+        return this.messageBuilder.buildHistoryReport(stats, from, to, percentile);
+    }
+
+    private void sendDelayed(String responseUrl, String json) {
+
+        if (responseUrl == null || responseUrl.isEmpty()) {
+            return;
+        }
+
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(responseUrl))
+                .header("Content-Type", "application/json; charset=utf-8")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+
+            this.httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+        } catch (Exception e) {
+            System.err.println("[Mattermost] Failed to send delayed response: " + e.getMessage());
+        }
     }
 
     private boolean isTokenValid(String token) {
 
-        java.util.Set<String> tokens = this.config.getMattermostTokens();
-
-        if (tokens.isEmpty()) {
-            System.err.println("[Mattermost] MATTERMOST_TOKEN не настроен — все запросы отклонены");
-            return false;
-        }
-
-        return tokens.contains(token);
+        return this.validTokens.contains(token);
     }
 
     private Map<String, String> parseBody(HttpExchange exchange) throws IOException {

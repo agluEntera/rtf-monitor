@@ -1,6 +1,7 @@
 package ru.entera.rftmonitor.client;
 
 import ru.entera.rftmonitor.config.AppConfig;
+import ru.entera.rftmonitor.model.StatusHistoryStat;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -12,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalDouble;
 
 /**
@@ -110,13 +112,7 @@ public class MySqlRepository {
     /**
      * Computes the N-th percentile of volume-weighted time historical issues spent in the given status.
      * <p>
-     * Data source: {@code DetailedIssuesChangelog} — each enter/exit pair for the status is one
-     * data point. Only pairs whose <b>exit date</b> falls within [{@code fromDate}, {@code toDate}]
-     * are included, and only issues with SP > 0.
-     * <p>
-     * Metric per data point: {@code businessDays × storyPoints}, where
-     * {@code businessDays = hours / 24 × (5/7)}.
-     * A 4-SP task that waited 1 day contributes 4; a 1-SP task contributes 1.
+     * See {@link #getHistoryStats} for full details. This method is a convenience wrapper.
      *
      * @param status     Jira status name (e.g. "Ready for Testing")
      * @param fromDate   start of the exit-date filter range (inclusive)
@@ -126,67 +122,40 @@ public class MySqlRepository {
      */
     public OptionalDouble getPercentile(String status, LocalDate fromDate, LocalDate toDate, int percentile) {
 
-        // For each transition INTO `status` (New = status), find the first transition
-        // OUT OF `status` (Old = status) that follows it. Filter to pairs where the
-        // exit falls within [fromDate, toDate].
-        String sql = """
-            SELECT
-                TIMESTAMPDIFF(HOUR, entries.enter_date, entries.exit_date) AS hours_in_status,
-                i.SP
-            FROM (
-                SELECT
-                    e.IssueId,
-                    e.CreatedDate AS enter_date,
-                    (SELECT MIN(x.CreatedDate)
-                     FROM DetailedIssuesChangelog x
-                     WHERE x.IssueId = e.IssueId
-                       AND x.Field = 'status'
-                       AND x.Old = ?
-                       AND x.CreatedDate > e.CreatedDate) AS exit_date
-                FROM DetailedIssuesChangelog e
-                WHERE e.Field = 'status'
-                  AND e.New = ?
-            ) AS entries
-            JOIN IssuesInfo i ON i.IssueId = entries.IssueId
-            WHERE entries.exit_date IS NOT NULL
-              AND DATE(entries.exit_date) BETWEEN ? AND ?
-              AND COALESCE(i.SP, 0) > 0
-              AND i.IssueKey LIKE ?
-              AND TIMESTAMPDIFF(HOUR, entries.enter_date, entries.exit_date) > 0
-            """;
+        return this.getHistoryStats(status, fromDate, toDate, percentile)
+            .map(s -> OptionalDouble.of(s.percentileValue()))
+            .orElse(OptionalDouble.empty());
+    }
 
-        List<Double> values = new ArrayList<>();
+    /**
+     * Computes volume-weighted percentile statistics for historical time spent in the given status.
+     * <p>
+     * Data source: {@code DetailedIssuesChangelog} — all issues across all sprints.
+     * For each transition INTO {@code status} ({@code New = status}), the first following
+     * transition OUT OF {@code status} ({@code Old = status}) is found. Only pairs whose
+     * <b>exit date</b> falls within [{@code fromDate}, {@code toDate}] are included,
+     * and only issues with SP > 0.
+     * <p>
+     * Metric per data point: {@code businessDays × storyPoints}, where
+     * {@code businessDays = hours / 24 × (5/7)}.
+     * A 4-SP task that waited 1 day contributes 4; a 1-SP task contributes 1.
+     *
+     * @param status     Jira status name (e.g. "Ready for Testing")
+     * @param fromDate   start of the exit-date filter range (inclusive)
+     * @param toDate     end of the exit-date filter range (inclusive)
+     * @param percentile percentile to compute (e.g. 50, 70, 95)
+     * @return stats with percentile value and sample count, or empty if no data
+     */
+    public Optional<StatusHistoryStat> getHistoryStats(String status, LocalDate fromDate, LocalDate toDate, int percentile) {
 
-        try (Connection conn = this.connect();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            stmt.setString(1, status);
-            stmt.setString(2, status);
-            stmt.setObject(3, fromDate);
-            stmt.setObject(4, toDate);
-            stmt.setString(5, this.config.getJiraProject() + "-%");
-
-            try (ResultSet rs = stmt.executeQuery()) {
-
-                while (rs.next()) {
-                    double hours = rs.getDouble("hours_in_status");
-                    double sp = rs.getDouble("SP");
-                    double businessDays = hours / 24.0 * (5.0 / 7.0);
-                    values.add(businessDays * sp);
-                }
-            }
-        } catch (SQLException e) {
-            System.err.println("[MySQL] getPercentile error for '" + status + "': " + e.getMessage());
-
-            return OptionalDouble.empty();
-        }
+        List<Double> values = this.loadWeightedDays(status, fromDate, toDate);
 
         if (values.isEmpty()) {
 
-            return OptionalDouble.empty();
+            return Optional.empty();
         }
 
-        return OptionalDouble.of(this.percentile(values, percentile));
+        return Optional.of(new StatusHistoryStat(this.percentile(values, percentile), values.size()));
     }
 
     /**
@@ -425,6 +394,61 @@ public class MySqlRepository {
     private String buildPlaceholders(int count) {
 
         return "?,".repeat(count - 1) + "?";
+    }
+
+    private List<Double> loadWeightedDays(String status, LocalDate fromDate, LocalDate toDate) {
+
+        String sql = """
+            SELECT
+                TIMESTAMPDIFF(HOUR, entries.enter_date, entries.exit_date) AS hours_in_status,
+                i.SP
+            FROM (
+                SELECT
+                    e.IssueId,
+                    e.CreatedDate AS enter_date,
+                    (SELECT MIN(x.CreatedDate)
+                     FROM DetailedIssuesChangelog x
+                     WHERE x.IssueId = e.IssueId
+                       AND x.Field = 'status'
+                       AND x.Old = ?
+                       AND x.CreatedDate > e.CreatedDate) AS exit_date
+                FROM DetailedIssuesChangelog e
+                WHERE e.Field = 'status'
+                  AND e.New = ?
+            ) AS entries
+            JOIN IssuesInfo i ON i.IssueId = entries.IssueId
+            WHERE entries.exit_date IS NOT NULL
+              AND DATE(entries.exit_date) BETWEEN ? AND ?
+              AND COALESCE(i.SP, 0) > 0
+              AND i.IssueKey LIKE ?
+              AND TIMESTAMPDIFF(HOUR, entries.enter_date, entries.exit_date) > 0
+            """;
+
+        List<Double> values = new ArrayList<>();
+
+        try (Connection conn = this.connect();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, status);
+            stmt.setString(2, status);
+            stmt.setObject(3, fromDate);
+            stmt.setObject(4, toDate);
+            stmt.setString(5, this.config.getJiraProject() + "-%");
+
+            try (ResultSet rs = stmt.executeQuery()) {
+
+                while (rs.next()) {
+                    double hours = rs.getDouble("hours_in_status");
+                    double sp = rs.getDouble("SP");
+                    double businessDays = hours / 24.0 * (5.0 / 7.0);
+                    values.add(businessDays * sp);
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("[MySQL] loadWeightedDays error for '" + status + "': " + e.getMessage());
+        }
+
+        return values;
     }
 
     private double percentile(List<Double> values, int p) {

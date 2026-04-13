@@ -4,6 +4,8 @@ import io.github.cdimascio.dotenv.Dotenv;
 import lombok.Getter;
 import java.net.URI;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Application configuration loaded from .env file and environment variables.
@@ -61,6 +63,20 @@ public class AppConfig {
     /** Порог в рабочих днях для категории "Покинутые задачи". */
     public static final int STALE_ABANDONED_DAYS = 8;
 
+    public record SlashCommand(String trigger, String description) {}
+
+    public static final List<SlashCommand> SLASH_COMMANDS = List.of(
+        new SlashCommand("rft-status",  "Полный отчёт по всем статусам"),
+        new SlashCommand("rft-review",  "Ready for Review + Under Review"),
+        new SlashCommand("rft-testing", "Ready for Testing + In Testing"),
+        new SlashCommand("rft-stale",   "Зависшие задачи по категориям"),
+        new SlashCommand("rft-history", "История: /rft-history [dd.MM.yyyy dd.MM.yyyy [персентиль]]")
+    );
+
+    public static final Set<String> SLASH_COMMAND_TRIGGERS = SLASH_COMMANDS.stream()
+        .map(SlashCommand::trigger)
+        .collect(Collectors.toSet());
+
     private static final String DEFAULT_JIRA_URL = "https://entera.atlassian.net";
     private static final String DEFAULT_JIRA_PROJECT = "EN";
     private static final int DEFAULT_THRESHOLD = 4;
@@ -92,7 +108,9 @@ public class AppConfig {
     private final boolean mattermostEnabled;
     private final String mattermostUrl;
     private final int mattermostPort;
-    private final java.util.Set<String> mattermostTokens;
+    private final String mattermostToken;
+    private final String mattermostTeam;
+    private final String mattermostBotUrl;
 
     //endregion
 
@@ -128,11 +146,9 @@ public class AppConfig {
         this.mattermostEnabled = Boolean.parseBoolean(dotenv.get("MATTERMOST_ENABLED", "false"));
         this.mattermostUrl = dotenv.get("MATTERMOST_URL", DEFAULT_MATTERMOST_URL);
         this.mattermostPort = Integer.parseInt(dotenv.get("MATTERMOST_PORT", String.valueOf(DEFAULT_MATTERMOST_PORT)));
-        String rawTokens = dotenv.get("MATTERMOST_TOKEN", "");
-        this.mattermostTokens = java.util.Arrays.stream(rawTokens.split(","))
-            .map(String::trim)
-            .filter(t -> !t.isEmpty())
-            .collect(java.util.stream.Collectors.toSet());
+        this.mattermostToken = dotenv.get("MATTERMOST_TOKEN", "");
+        this.mattermostTeam = dotenv.get("MATTERMOST_TEAM", "");
+        this.mattermostBotUrl = dotenv.get("MATTERMOST_BOT_URL", "");
 
         String rawProxy = System.getenv("https_proxy");
 

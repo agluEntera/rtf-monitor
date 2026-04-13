@@ -10,12 +10,15 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.model.Issue;
 import ru.entera.rftmonitor.model.StaleReport;
+import ru.entera.rftmonitor.model.StatusHistoryStat;
 import ru.entera.rftmonitor.service.IssueService;
 import ru.entera.rftmonitor.service.MessageBuilder;
-import java.util.HashMap;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
-import java.util.OptionalDouble;
+import java.util.Optional;
 
 /**
  * Telegram long-polling bot for RFT monitoring.
@@ -77,6 +80,7 @@ public final class MonitorBot extends TelegramLongPollingBot {
                 BotCommand.builder().command("review").description("Отчёт: Ready for Review + Under Review").build(),
                 BotCommand.builder().command("testing").description("Отчёт: Ready for Testing + In Testing").build(),
                 BotCommand.builder().command("stale").description("Зависшие задачи по категориям").build(),
+                BotCommand.builder().command("history").description("История: /history [dd.MM.yyyy dd.MM.yyyy [%]]").build(),
                 BotCommand.builder().command("help").description("Список команд").build()
             ))
             .build();
@@ -109,12 +113,17 @@ public final class MonitorBot extends TelegramLongPollingBot {
             this.handleTesting(chatId);
         } else if (text.startsWith("/stale")) {
             this.handleStale(chatId);
+        } else if (text.startsWith("/history")) {
+            String args = text.substring("/history".length()).trim();
+            this.handleHistory(chatId, args);
         }
     }
 
     //endregion
 
     //region Private
+
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
     private void handleHelp(long chatId) {
 
@@ -123,7 +132,9 @@ public final class MonitorBot extends TelegramLongPollingBot {
             + "/status — полный отчёт по всем статусам\n"
             + "/review — отчёт: Ready for Review + Under Review\n"
             + "/testing — отчёт: Ready for Testing + In Testing\n"
-            + "/stale — зависшие задачи по категориям"
+            + "/stale — зависшие задачи по категориям\n"
+            + "/history [dd.MM.yyyy dd.MM.yyyy [персентиль]] — историческая статистика\n"
+            + "  Пример: /history 01.01.2025 31.03.2025 70"
         );
     }
 
@@ -187,15 +198,39 @@ public final class MonitorBot extends TelegramLongPollingBot {
         }
     }
 
-    private Map<String, OptionalDouble> buildP70Map() {
+    private void handleHistory(long chatId, String args) {
 
-        Map<String, OptionalDouble> p70ByStatus = new HashMap<>();
+        this.send(chatId, "⏳ Собираю данные...");
 
-        for (String status : AppConfig.MONITORED_STATUSES) {
-            p70ByStatus.put(status, this.issueService.getP70(status));
+        LocalDate to = LocalDate.now();
+        LocalDate from = to.minusMonths(3);
+        int percentile = 70;
+
+        String[] parts = args.isBlank() ? new String[0] : args.split("\\s+");
+
+        try {
+            if (parts.length == 1) {
+                percentile = Integer.parseInt(parts[0]);
+            } else if (parts.length >= 3) {
+                from = LocalDate.parse(parts[0], DATE_FMT);
+                to = LocalDate.parse(parts[1], DATE_FMT);
+                percentile = Integer.parseInt(parts[2]);
+            } else if (parts.length == 2) {
+                from = LocalDate.parse(parts[0], DATE_FMT);
+                to = LocalDate.parse(parts[1], DATE_FMT);
+            }
+        } catch (DateTimeParseException | NumberFormatException e) {
+            this.send(chatId, "❌ Формат: /history [dd.MM.yyyy dd.MM.yyyy [персентиль]]\nПример: /history 01.01.2025 31.03.2025 70");
+
+            return;
         }
 
-        return p70ByStatus;
+        try {
+            Map<String, Optional<StatusHistoryStat>> stats = this.issueService.getHistoryReport(from, to, percentile);
+            this.send(chatId, this.messageBuilder.buildHistoryReport(stats, from, to, percentile));
+        } catch (Exception e) {
+            this.send(chatId, "❌ Ошибка: " + e.getMessage());
+        }
     }
 
     private void send(long chatId, String text) {

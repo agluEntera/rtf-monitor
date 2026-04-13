@@ -4,12 +4,15 @@ import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.model.Issue;
 import ru.entera.rftmonitor.model.StaleIssue;
 import ru.entera.rftmonitor.model.StaleReport;
+import ru.entera.rftmonitor.model.StatusHistoryStat;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.stream.Collectors;
 
@@ -171,16 +174,6 @@ public final class MattermostMessageBuilder {
                     .append(stat[0]).append(" задач (").append(stat[1]).append(" просрочено)\n");
             });
 
-        sb.append("\n**P70 истории:**\n");
-
-        for (String status : AppConfig.MONITORED_STATUSES) {
-            String emoji = STATUS_EMOJI.getOrDefault(status, "📋");
-            OptionalDouble p70 = p70ByStatus.getOrDefault(status, OptionalDouble.empty());
-            String p70Str = p70.isPresent() ? p70.getAsDouble() + " SP·раб.дн." : "нет данных";
-
-            sb.append("  ").append(emoji).append(" ").append(status).append(": ").append(p70Str).append("\n");
-        }
-
         sb.append("\n\n_📌 Проект: ").append(this.config.getJiraProject())
             .append(" · Спринт: активный · Порог: ")
             .append(this.config.getThresholdBusinessDays()).append(" раб. дн._");
@@ -330,9 +323,6 @@ public final class MattermostMessageBuilder {
             .append(flag).append(" on-time: ").append(okCount).append("/").append(total)
             .append(" = ").append(pct).append("%\n");
 
-        if (p70.isPresent()) {
-            sb.append("  📈 P70 истории: ").append(p70.getAsDouble()).append(" SP·раб.дн.\n");
-        }
 
         if (!overdue.isEmpty()) {
             sb.append("  🔴 **Просрочены (> ").append(this.config.getThresholdBusinessDays()).append(" дн.):**\n");
@@ -364,6 +354,48 @@ public final class MattermostMessageBuilder {
 
         return "• [" + issue.getKey() + "](" + issue.getUrl() + ")"
             + " — " + daysStr + "  " + issue.getAssignee() + spStr + weightStr;
+    }
+
+    /**
+     * Builds a historical percentile report for all monitored statuses.
+     *
+     * @param statsByStatus map from status to stats (may be absent if no data)
+     * @param fromDate      start of the period
+     * @param toDate        end of the period
+     * @param percentile    percentile value (e.g. 70)
+     * @return Markdown-formatted message
+     */
+    public String buildHistoryReport(
+        Map<String, Optional<StatusHistoryStat>> statsByStatus,
+        LocalDate fromDate, LocalDate toDate, int percentile) {
+
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 📊 История статусов за ")
+            .append(fromDate.format(fmt)).append("–").append(toDate.format(fmt))
+            .append("  (P").append(percentile).append(")\n\n");
+
+        for (String status : AppConfig.MONITORED_STATUSES) {
+            String emoji = STATUS_EMOJI.getOrDefault(status, "📋");
+            Optional<StatusHistoryStat> stat = statsByStatus.getOrDefault(status, Optional.empty());
+
+            sb.append(emoji).append(" **").append(status).append("**\n");
+
+            if (stat.isPresent()) {
+                sb.append("  📈 P").append(percentile).append(": **")
+                    .append(stat.get().percentileValue()).append(" SP·раб.дн.**\n");
+                sb.append("  📦 Выборка: ").append(stat.get().count()).append(" завершённых переходов\n");
+            } else {
+                sb.append("  — нет данных за период\n");
+            }
+
+            sb.append("\n");
+        }
+
+        sb.append("_📌 Проект: ").append(this.config.getJiraProject())
+            .append(" · Все спринты · Метрика: SP × раб.дней_");
+
+        return sb.toString().stripTrailing();
     }
 
     //endregion

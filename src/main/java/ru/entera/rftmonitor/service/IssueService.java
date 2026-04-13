@@ -6,6 +6,7 @@ import ru.entera.rftmonitor.config.AppConfig;
 import ru.entera.rftmonitor.model.Issue;
 import ru.entera.rftmonitor.model.StaleIssue;
 import ru.entera.rftmonitor.model.StaleReport;
+import ru.entera.rftmonitor.model.StatusHistoryStat;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -163,18 +164,27 @@ public final class IssueService {
     }
 
     /**
-     * Returns the 70th percentile of volume-weighted time (SP·business-days) spent in the given
-     * status, based on historical issues that left the status within the last 3 months.
+     * Returns historical percentile statistics for all monitored statuses.
+     * <p>
+     * For each status, computes the N-th percentile of SP·business-days spent in it,
+     * counting only transitions that completed within [{@code fromDate}, {@code toDate}].
+     * All issues across all sprints are included (no sprint filter).
      *
-     * @param status status name
-     * @return P70 in SP·business-days, or empty if no data
+     * @param fromDate   start of the exit-date range (inclusive)
+     * @param toDate     end of the exit-date range (inclusive)
+     * @param percentile percentile to compute (e.g. 50, 70, 95)
+     * @return map from status name to stats (percentile value + sample count)
      */
-    public OptionalDouble getP70(String status) {
+    public Map<String, java.util.Optional<StatusHistoryStat>> getHistoryReport(
+        LocalDate fromDate, LocalDate toDate, int percentile) {
 
-        LocalDate to = LocalDate.now();
-        LocalDate from = to.minus(Period.ofMonths(3));
+        Map<String, java.util.Optional<StatusHistoryStat>> result = new java.util.LinkedHashMap<>();
 
-        return this.mySqlRepository.getPercentile(status, from, to, 70);
+        for (String status : AppConfig.MONITORED_STATUSES) {
+            result.put(status, this.mySqlRepository.getHistoryStats(status, fromDate, toDate, percentile));
+        }
+
+        return result;
     }
 
     //endregion
