@@ -107,21 +107,27 @@ public class MySqlRepository {
     }
 
     /**
-     * Computes the 70th percentile of time spent in the given status.
+     * Computes the 70th percentile of volume-weighted time spent in the given status.
      * <p>
-     * Scope: issues from the configured project that left the status within the last 3 months.
-     * Conversion: calendar hours → business days via 5/7 ratio.
+     * Scope: issues from the configured project that left the status within the last 3 months,
+     * with SP > 0.
+     * <p>
+     * Metric per issue: {@code businessDays × storyPoints}, where
+     * {@code businessDays = hours / 24 × (5/7)}.
+     * This weights larger issues proportionally — a 4-SP task that waited 1 day counts as 4,
+     * while a 1-SP task counts as 1.
      *
      * @param status status name matching a column in {@code IssueStatusDurations}
-     * @return P70 in business days, or empty if no historical data
+     * @return P70 in SP·business-days, or empty if no historical data
      */
     public OptionalDouble getP70BusinessDays(String status) {
 
         String sql = """
-            SELECT isd.`%s`
+            SELECT isd.`%s`, i.SP
             FROM IssueStatusDurations isd
             JOIN IssuesInfo i ON i.IssueKey = isd.Key
             WHERE isd.`%s` > 0
+              AND COALESCE(i.SP, 0) > 0
               AND isd.current_status != ?
               AND isd.Key LIKE ?
               AND i.IssueId IN (
@@ -146,7 +152,9 @@ public class MySqlRepository {
 
                 while (rs.next()) {
                     double hours = rs.getDouble(1);
-                    values.add(hours / 24.0 * (5.0 / 7.0));
+                    double sp = rs.getDouble(2);
+                    double businessDays = hours / 24.0 * (5.0 / 7.0);
+                    values.add(businessDays * sp);
                 }
             }
         } catch (SQLException e) {

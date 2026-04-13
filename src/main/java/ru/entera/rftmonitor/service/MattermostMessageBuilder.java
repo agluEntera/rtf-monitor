@@ -176,7 +176,7 @@ public final class MattermostMessageBuilder {
         for (String status : AppConfig.MONITORED_STATUSES) {
             String emoji = STATUS_EMOJI.getOrDefault(status, "📋");
             OptionalDouble p70 = p70ByStatus.getOrDefault(status, OptionalDouble.empty());
-            String p70Str = p70.isPresent() ? p70.getAsDouble() + " раб. дней" : "нет данных";
+            String p70Str = p70.isPresent() ? p70.getAsDouble() + " SP·раб.дн." : "нет данных";
 
             sb.append("  ").append(emoji).append(" ").append(status).append(": ").append(p70Str).append("\n");
         }
@@ -297,11 +297,14 @@ public final class MattermostMessageBuilder {
     private String formatStaleIssueLine(StaleIssue issue) {
 
         String spStr = issue.getStoryPoints() != null ? " | " + issue.getStoryPoints() + " SP" : "";
+        String weightStr = (issue.getStoryPoints() != null && issue.getStoryPoints() > 0)
+            ? " | **" + Math.round(issue.getDaysSinceChange() * issue.getStoryPoints() * 10.0) / 10.0 + " SP·дн.**"
+            : "";
 
         return "• [" + issue.getKey() + "](" + issue.getUrl() + ")"
             + " — **" + issue.getDaysSinceChange() + " дн.**"
             + " [" + issue.getStatus() + "]"
-            + "  " + issue.getAssignee() + spStr;
+            + "  " + issue.getAssignee() + spStr + weightStr;
     }
 
     private String buildStatusSection(String status, String emoji, List<Issue> issues, OptionalDouble p70) {
@@ -328,7 +331,7 @@ public final class MattermostMessageBuilder {
             .append(" = ").append(pct).append("%\n");
 
         if (p70.isPresent()) {
-            sb.append("  📈 P70 истории: ").append(p70.getAsDouble()).append(" раб. дней\n");
+            sb.append("  📈 P70 истории: ").append(p70.getAsDouble()).append(" SP·раб.дн.\n");
         }
 
         if (!overdue.isEmpty()) {
@@ -355,9 +358,12 @@ public final class MattermostMessageBuilder {
         String days = issue.getBusinessDays() != null ? String.valueOf(issue.getBusinessDays()) : "?";
         String daysStr = bold ? "**" + days + " дн.**" : days + " дн.";
         String spStr = issue.getStoryPoints() != null ? " | " + issue.getStoryPoints() + " SP" : "";
+        String weightStr = (issue.getBusinessDays() != null && issue.getStoryPoints() != null && issue.getStoryPoints() > 0)
+            ? " | **" + Math.round(issue.getBusinessDays() * issue.getStoryPoints() * 10.0) / 10.0 + " SP·дн.**"
+            : "";
 
         return "• [" + issue.getKey() + "](" + issue.getUrl() + ")"
-            + " — " + daysStr + "  " + issue.getAssignee() + spStr;
+            + " — " + daysStr + "  " + issue.getAssignee() + spStr + weightStr;
     }
 
     //endregion
