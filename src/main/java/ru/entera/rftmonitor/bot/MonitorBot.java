@@ -23,6 +23,7 @@ import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Telegram long-polling bot for RFT monitoring.
@@ -32,6 +33,17 @@ public final class MonitorBot extends TelegramLongPollingBot {
     //region Constants
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
+
+    //endregion
+
+    //region Wizard state
+
+    private enum WizardStage { AWAITING_FROM, AWAITING_TO }
+
+    private record HistoryWizard(WizardStage stage, LocalDate from) {}
+
+    /** Per-chat wizard state for custom /history input. */
+    private final Map<Long, HistoryWizard> wizards = new ConcurrentHashMap<>();
 
     //endregion
 
@@ -96,8 +108,15 @@ public final class MonitorBot extends TelegramLongPollingBot {
             return;
         }
 
-        String text = update.getMessage().getText();
-        long chatId = update.getMessage().getChatId();
+        String text   = update.getMessage().getText();
+        long   chatId = update.getMessage().getChatId();
+
+        // If the user is in the middle of a custom history wizard, intercept all text
+        HistoryWizard wizard = this.wizards.get(chatId);
+        if (wizard != null && !text.startsWith("/")) {
+            this.handleWizardInput(chatId, text.trim(), wizard);
+            return;
+        }
 
         if (text.startsWith("/start") || text.startsWith("/help")) {
             this.handleHelp(chatId);
@@ -180,7 +199,7 @@ public final class MonitorBot extends TelegramLongPollingBot {
     }
 
     /**
-     * /history without args — shows quick-pick inline keyboard.
+     * /history without args — shows quick-pick inline keyboard + "Свой период" button.
      * /history with args — parses directly (e.g. /history 01.01.2025 31.03.2025 70).
      */
     private void handleHistory(long chatId, String args) {
@@ -190,7 +209,7 @@ public final class MonitorBot extends TelegramLongPollingBot {
             return;
         }
 
-        // No args — show quick-pick keyboard
+        // No args — show quick-pick keyboard with custom-entry button
         InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder()
             .keyboardRow(List.of(
                 btn("30 дн · P50",  "hist:30:50"),
@@ -209,12 +228,70 @@ public final class MonitorBot extends TelegramLongPollingBot {
                 btn("1 год · P70",  "hist:365:70"),
                 btn("1 год · P90",  "hist:365:90")
             ))
+            .keyboardRow(List.of(
+                btn("✏️ Свой период", "hist:custom")
+            ))
             .build();
 
         try {
             this.execute(SendMessage.builder()
                 .chatId(chatId)
-                .text("📊 <b>История статусов</b>\n\nВыберите период и персентиль:")
+                .text("📊 <b>История статусов</b>\n\nВыберите период и персентиль или введите свои:")
+                .parseMode("HTML")
+                .replyMarkup(markup)
+                .build());
+        } catch (TelegramApiException e) {
+            System.err.println("[Telegram] Send error: " + e.getMessage());
+        }
+    }
+
+    //endregion
+
+    //region Private — history wizard (custom date entry)
+
+    private void handleWizardInput(long chatId, String text, HistoryWizard wizard) {
+
+        switch (wizard.stage()) {
+            case AWAITING_FROM -> {
+                try {
+                    LocalDate from = LocalDate.parse(text, DATE_FMT);
+                    this.wizards.put(chatId, new HistoryWizard(WizardStage.AWAITING_TO, from));
+                    this.send(chatId, "Введите дату конца (дд.ММ.гггг):");
+                } catch (DateTimeParseException e) {
+                    this.send(chatId, "❌ Неверный формат. Введите дату начала (дд.ММ.гггг), например <code>01.01.2025</code>:");
+                }
+            }
+            case AWAITING_TO -> {
+                try {
+                    LocalDate to = LocalDate.parse(text, DATE_FMT);
+                    this.wizards.remove(chatId);
+                    this.showPercentileKeyboard(chatId, wizard.from(), to);
+                } catch (DateTimeParseException e) {
+                    this.send(chatId, "❌ Неверный формат. Введите дату конца (дд.ММ.гггг), например <code>31.03.2025</code>:");
+                }
+            }
+        }
+    }
+
+    private void showPercentileKeyboard(long chatId, LocalDate from, LocalDate to) {
+
+        String f = from.format(DATE_FMT);
+        String t = to.format(DATE_FMT);
+        String pfx = "hist_pct:" + f + ":" + t + ":";
+
+        InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder()
+            .keyboardRow(List.of(
+                btn("P50 · медиана", pfx + "50"),
+                btn("P70",           pfx + "70"),
+                btn("P90",           pfx + "90"),
+                btn("P95",           pfx + "95")
+            ))
+            .build();
+
+        try {
+            this.execute(SendMessage.builder()
+                .chatId(chatId)
+                .text("📅 <b>" + f + " — " + t + "</b>\n\nВыберите персентиль:")
                 .parseMode("HTML")
                 .replyMarkup(markup)
                 .build());
@@ -241,9 +318,18 @@ public final class MonitorBot extends TelegramLongPollingBot {
             // non-critical
         }
 
-        if (data != null && data.startsWith("hist:")) {
-            String[] parts = data.split(":");
+        if (data == null) {
+            return;
+        }
 
+        if (data.equals("hist:custom")) {
+            // Start the custom date wizard
+            this.wizards.put(chatId, new HistoryWizard(WizardStage.AWAITING_FROM, null));
+            this.send(chatId, "📅 Введите дату начала (дд.ММ.гггг), например <code>01.01.2025</code>:");
+
+        } else if (data.startsWith("hist:")) {
+            // Quick-pick: hist:{days}:{percentile}
+            String[] parts = data.split(":");
             int days       = Integer.parseInt(parts[1]);
             int percentile = Integer.parseInt(parts[2]);
 
@@ -253,6 +339,25 @@ public final class MonitorBot extends TelegramLongPollingBot {
             this.send(chatId, "⏳ Собираю данные...");
 
             try {
+                Map<String, Optional<StatusHistoryStat>> stats =
+                    this.issueService.getHistoryReport(from, to, percentile);
+                this.send(chatId, this.messageBuilder.buildHistoryReport(stats, from, to, percentile));
+            } catch (Exception e) {
+                this.send(chatId, "❌ Ошибка: " + e.getMessage());
+            }
+
+        } else if (data.startsWith("hist_pct:")) {
+            // Custom period percentile pick: hist_pct:{from}:{to}:{percentile}
+            // e.g. hist_pct:01.01.2025:31.03.2025:70
+            String[] parts = data.split(":");
+            // parts: [0]="hist_pct" [1]="01.01.2025" [2]="31.03.2025" [3]="70"
+            try {
+                LocalDate from     = LocalDate.parse(parts[1], DATE_FMT);
+                LocalDate to       = LocalDate.parse(parts[2], DATE_FMT);
+                int       percentile = Integer.parseInt(parts[3]);
+
+                this.send(chatId, "⏳ Собираю данные...");
+
                 Map<String, Optional<StatusHistoryStat>> stats =
                     this.issueService.getHistoryReport(from, to, percentile);
                 this.send(chatId, this.messageBuilder.buildHistoryReport(stats, from, to, percentile));
