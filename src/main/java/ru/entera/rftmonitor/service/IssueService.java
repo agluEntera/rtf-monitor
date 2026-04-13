@@ -9,6 +9,7 @@ import ru.entera.rftmonitor.model.StaleReport;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Period;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -162,14 +163,18 @@ public final class IssueService {
     }
 
     /**
-     * Returns the 70th percentile of time in the given status from historical closed issues.
+     * Returns the 70th percentile of volume-weighted time (SP·business-days) spent in the given
+     * status, based on historical issues that left the status within the last 3 months.
      *
      * @param status status name
-     * @return P70 in business days, or empty if no data
+     * @return P70 in SP·business-days, or empty if no data
      */
     public OptionalDouble getP70(String status) {
 
-        return this.mySqlRepository.getP70BusinessDays(status);
+        LocalDate to = LocalDate.now();
+        LocalDate from = to.minus(Period.ofMonths(3));
+
+        return this.mySqlRepository.getPercentile(status, from, to, 70);
     }
 
     //endregion
